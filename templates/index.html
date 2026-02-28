@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="uk">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Fractional Edge Detection</title>
+        <style>
+            body {
+                font-family: sans-serif;
+                max-width: 800px;
+                margin: 40px auto;
+                padding: 20px;
+                line-height: 1.6;
+            }
+            .upload-section {
+                border: 2px dashed #ccc;
+                padding: 30px;
+                text-align:center;
+                border-radius: 10px;
+            }
+            button {
+                background-color: #007bff;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Детекція контурів похідними</h1>
+        <div class="upload-section">
+            <h3>Завантажте зображення для обробки</h3>
+            <form action="/upload" method="post" enctype="multipart/form-data">
+                <input type="file" name="file" accept="image/*" required>
+                <br><br>
+                <button type="submit">Обробити зображення (Guassian Blur)</button>
+            </form>
+        </div>
+
+        <hr>
+        <h3>Галерея останніх робіт</h3>
+        <p>Тут з'являться ваші зображення після підключення бази даних.</p>
+    </body>
+</html>
