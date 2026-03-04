@@ -4,99 +4,7 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Fractional Edge Detection</title>
-        <style>
-            body {
-                font-family: sans-serif;
-                max-width: 800px;
-                margin: 40px auto;
-                padding: 20px;
-                line-height: 1.6;
-            }
-            .upload-section {
-                border: 2px dashed #ccc;
-                padding: 30px;
-                text-align:center;
-                border-radius: 10px;
-            }
-            button {
-                background-color: #007bff;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 5px;
-                cursor: pointer;
-            }
-            .gallery {
-                display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-                gap: 15px;
-                margin-top: 20px;
-            }
-            .gallery-item {
-                background: #fff;
-                border: 1px solid #e0e0e0;
-                border-radius: 12px;
-                overflow: hidden;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-                transition: transform 0.2s;
-            }
-            .gallery-item:hover {
-                transform: scale(1.02);
-            }
-            .gallery-item img {
-                width: 100%;
-                height: 180px;
-                object-fit: cover;
-                border-radius: 4px;
-                display: block;
-                cursor: pointer;
-            }
-            .image-info {
-                padding: 8px;
-                font-size: 11px;
-                color: #555;
-                background: #f8f9fa;
-                border-top: 1px solid #eee;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            }
-            .modal {
-                display: none;
-                position: fixed;
-                z-index: 1000;
-                left: 0;
-                top: 0;
-                width: 100%;
-                height: 100%;
-                background-color: rgba(0,0,0,0.9);
-                align-items: center;
-                justify-content: center;
-                flex-direction: column;
-            }
-            .modal-content {
-                margin: auto;
-                display: block;
-                max-width: 90%;
-                max-height: 80%;
-                border-radius: 5px;
-                box-shadow: 0 0 20px rgba(255,255,255,0.2);
-            }
-            #caption {
-                margin: 15px;
-                color: #ccc;
-                font-weight: bold;
-            }
-            .close-btn {
-                position: absolute;
-                top: 20px;
-                right: 35px;
-                color: #f1f1f1;
-                font-size: 40px;
-                font-weight: bold;
-                cursor: pointer;
-            }
-        </style>
+        <link rel="stylesheet" href="/static/css/style.css">
     </head>
     <body>
         <h1>Детекція контурів похідними</h1>
@@ -130,29 +38,6 @@
             <img class="modal-content" id="fullImage">
             <div id="caption"></div>
         </div>
-        <script>
-            const modal = document.getElementById("imageModal");
-            const modalImg = document.getElementById("fullImage");
-            const captionText = document.getElementById("caption");
-            const closeBtn = document.querySelector(".close-btn");
-
-            document.querySelectorAll(".gallery-item img").forEach(img => {
-                img.onclick = function() {
-                    modal.style.display = "flex";
-                    modalImg.src = this.src;
-                    captionText.innerHTML = this.alt;
-                }
-            });
-
-            closeBtn.onclick = function() {
-                modal.style.display = "none";
-            }
-
-            modal.onclick = function(event) {
-                if (event.target === modal) {
-                    modal.style.display = "none";
-                }
-            }
-        </script>
+        <script src="/static/js/script.js"></script>
     </body>
 </html>
