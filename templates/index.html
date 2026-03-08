@@ -24,9 +24,9 @@
         <div class="gallery">
             {% for image in images %}
                 <div class="gallery-item">
-                    <img src ="/static/uploads/{{ image }}" alt="{{ image }}">
+                    <img src ="/static/uploads/{{ image.filename }}" alt="{{ image.filename }}">
                     <div class="image-info">
-                        {{ image }}
+                        {{ image.filename }}
                     </div>
                 </div>
             {% else %}
