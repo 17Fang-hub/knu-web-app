@@ -12,6 +12,21 @@
             <h3>Завантажте зображення для обробки</h3>
             <input type="file" id="fileInput" accept="image/*" required>
             <br><br>
+            <div id="renameSection" style="display:none;">
+                <label for="customName">Зберегти як:</label>
+                <br><br>
+                <div style="display:flex; align-items:center; justify-content:center; gap:4px;">
+                    <input
+                        type="text"
+                        id="customName"
+                        placeholder="filename"
+                        style="padding:8px; border-radius:5px; border:1px solid #ccc; width:200px;"
+                    >
+                    <span id="fileExtension" style="font-weight:bold;"></span>
+                </div>
+                <small id="nameError" style="color:red; display:none;"></small>
+            </div>
+            <br>
             <button onclick="uploadImage()">Обробити зображення (Guassian Blur)</button>
         </div>
 
