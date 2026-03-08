@@ -20,3 +20,10 @@ modal.onclick = function(event) {
         modal.style.display = "none";
     }
 }
+
+function confirmDelete(filename) {
+    if (confirm("Are you sure you want to delete " + filename + "?")) {
+        fetch("/delete/" + filename, { method: "DELETE" })
+            .then(() => location.reload());
+    }
+}

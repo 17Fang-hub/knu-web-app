@@ -28,6 +28,11 @@
                     <div class="image-info">
                         {{ image.filename }}
                     </div>
+                    <button
+                        class="delete-btn"
+                        onclick="confirmDelete('{{  image.filename }}')">
+                        Delete
+                    </button>
                 </div>
             {% else %}
                 <p>Поки що немає завантажених зображень.</p>

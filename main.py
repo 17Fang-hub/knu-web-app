@@ -1,3 +1,4 @@
+import os
 import shutil
 from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File
@@ -9,16 +10,38 @@ from database import engine, AsyncSessionLocal, Base
 from models import Image
 from contextlib import asynccontextmanager
 
+UPLOAD_DIR = Path("static/uploads")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Image))
+        db_images = {str(img.filename) for img in result.scalars().all()}
+
+        disk_images = {
+            f.name for f in UPLOAD_DIR.iterdir()
+            if f.is_file()
+        }
+
+        for filename in disk_images - db_images:
+            session.add(Image(filename=filename))
+        
+        for filename in db_images - disk_images:
+            result = await session.execute(
+                select(Image).where(Image.filename==filename)
+            )
+            images_to_delete = result.scalars().all()
+            for image in images_to_delete:
+                await session.delete(image)
+        
+        await session.commit()
     yield
 
 app = FastAPI(lifespan=lifespan)
-
-UPLOAD_DIR = Path("static/uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -50,4 +73,21 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
         session.add(new_image)
         await session.commit()
 
+    return RedirectResponse(url="/", status_code=303)
+
+@app.delete("/delete/{filename}")
+async def delete_image(filename: str):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Image).where(Image.filename == filename)
+        )
+        image = result.scalar_one_or_none()
+        if image:
+            await session.delete(image)
+            await session.commit()
+        
+    file_path = UPLOAD_DIR / filename
+    if file_path.exists():
+        os.remove(file_path)
+    
     return RedirectResponse(url="/", status_code=303)

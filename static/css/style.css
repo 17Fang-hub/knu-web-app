@@ -100,3 +100,18 @@ button {
     font-weight: bold;
     cursor: pointer;
 }
+
+.delete-btn {
+    width: 100%;
+    padding: 6px;
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    border-radius: 0 0 12px, 12px;
+}
+
+.delete-btn:hover {
+    background-color: #b02a37
+}
