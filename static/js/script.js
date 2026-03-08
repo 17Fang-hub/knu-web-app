@@ -27,3 +27,26 @@ function confirmDelete(filename) {
             .then(() => location.reload());
     }
 }
+
+async function uploadImage() {
+    const fileInput = document.getElementById("fileInput");
+    if (!fileInput.files.length) {
+        alert("Please select a file first.");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+    
+    const response = await fetch("/upload", {
+        method: "POST",
+        body: formData
+    });
+
+    if (response.status === 409) {
+        const data = await response.json();
+        alert(data.error);
+    } else {
+        location.reload();
+    }
+}

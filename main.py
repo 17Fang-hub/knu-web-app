@@ -2,13 +2,14 @@ import os
 import shutil
 from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from database import engine, AsyncSessionLocal, Base
 from models import Image
 from contextlib import asynccontextmanager
+from sqlalchemy.exc import IntegrityError
 
 UPLOAD_DIR = Path("static/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -65,14 +66,21 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
     filename=file.filename or "image.jpg"
     file_path = UPLOAD_DIR / filename
 
+    async with AsyncSessionLocal() as session:
+        try:
+            new_image = Image(filename=filename)
+            session.add(new_image)
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            return JSONResponse(
+                status_code=409,
+                content={"error": f"Зображення з назвою '{filename}' вже існує."}
+            )
+
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
-    async with AsyncSessionLocal() as session:
-        new_image = Image(filename=filename)
-        session.add(new_image)
-        await session.commit()
-
     return RedirectResponse(url="/", status_code=303)
 
 @app.delete("/delete/{filename}")
