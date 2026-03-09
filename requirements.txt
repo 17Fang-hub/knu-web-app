@@ -5,3 +5,7 @@ python-multipart
 sqlalchemy
 asyncpg
 python-dotenv
+pytest
+pytest-asyncio
+httpx
+aiosqlite
