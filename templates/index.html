@@ -3,34 +3,68 @@
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="color-scheme" content="light dark">
         <title>Fractional Edge Detection</title>
+        <script>
+            // Apply theme before paint to avoid flash
+            (function () {
+                var saved = localStorage.getItem('theme');
+                var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                var useDark = saved === 'dark' || (saved === null && prefersDark);
+                if (useDark) document.documentElement.setAttribute('data-theme', 'dark');
+            })();
+
+            function updateToggleLabel() {
+                var btn = document.getElementById('themeToggle');
+                if (!btn) return;
+                var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                btn.textContent = isDark ? '☀' : '☾';
+                btn.title = isDark ? 'Світла тема' : 'Темна тема';
+            }
+
+            function toggleTheme() {
+                var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                if (isDark) {
+                    document.documentElement.removeAttribute('data-theme');
+                    localStorage.setItem('theme', 'light');
+                } else {
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                    localStorage.setItem('theme', 'dark');
+                }
+                updateToggleLabel();
+            }
+
+            document.addEventListener('DOMContentLoaded', function () {
+                updateToggleLabel();
+                document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+            });
+        </script>
         <link rel="stylesheet" href="/static/css/style.css">
     </head>
     <body>
-        <h1>Детекція контурів похідними</h1>
+        <header class="site-header">
+            <div class="brand">
+                <span class="brand-icon">◷</span>
+                <h1>Детекція контурів похідними</h1>
+            </div>
+            <button class="theme-toggle" id="themeToggle" type="button">☾</button>
+        </header>
+
         <div class="upload-section">
+            <span class="upload-icon">⬆</span>
             <h3>Завантажте зображення для обробки</h3>
+            <p class="upload-hint">Підтримуються формати JPG, PNG та інші зображення</p>
             <input type="file" id="fileInput" accept="image/*" required>
-            <br><br>
             <div id="renameSection" style="display:none;">
                 <label for="customName">Зберегти як:</label>
-                <br><br>
-                <div style="display:flex; align-items:center; justify-content:center; gap:4px;">
-                    <input
-                        type="text"
-                        id="customName"
-                        placeholder="filename"
-                        style="padding:8px; border-radius:5px; border:1px solid #ccc; width:200px;"
-                    >
-                    <span id="fileExtension" style="font-weight:bold;"></span>
+                <div class="rename-row">
+                    <input type="text" id="customName" class="name-input" placeholder="filename">
+                    <span id="fileExtension" class="file-ext"></span>
                 </div>
-                <small id="nameError" style="color:red; display:none;"></small>
+                <small id="nameError" class="name-error"></small>
             </div>
-            <br>
-            <button onclick="uploadImage()">Завантажити зображення</button>
+            <button class="btn-upload" onclick="uploadImage()">Завантажити зображення</button>
         </div>
-
-        <hr>
         <div class="gallery-header">
             <h3>Галерея завантажених зображень</h3>
             {% if has_results %}
