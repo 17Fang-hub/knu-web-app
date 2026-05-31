@@ -9,3 +9,5 @@ pytest
 pytest-asyncio
 httpx
 aiosqlite
+opencv-python
+numpy

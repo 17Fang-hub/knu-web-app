@@ -27,35 +27,85 @@
                 <small id="nameError" style="color:red; display:none;"></small>
             </div>
             <br>
-            <button onclick="uploadImage()">Обробити зображення (Guassian Blur)</button>
+            <button onclick="uploadImage()">Завантажити зображення</button>
         </div>
 
         <hr>
-        <h3>Галерея останніх робіт</h3>
-        <p>Тут з'являться ваші зображення після підключення бази даних.</p>
+        <div class="gallery-header">
+            <h3>Галерея завантажених зображень</h3>
+            {% if has_results %}
+            <a href="/export-csv" class="btn-export">&#x2193; Експортувати результати (CSV)</a>
+            {% else %}
+            <span class="btn-export btn-export-disabled">&#x2193; Експортувати результати (CSV)</span>
+            {% endif %}
+        </div>
 
+        {% if images %}
         <div class="gallery">
             {% for image in images %}
                 <div class="gallery-item">
-                    <img src ="/static/uploads/{{ image.filename }}" alt="{{ image.filename }}">
-                    <div class="image-info">
-                        {{ image.filename }}
-                    </div>
+                    <img src="/static/uploads/{{ image.filename }}" alt="{{ image.filename }}">
+                    <div class="image-info">{{ image.filename }}</div>
+                    <button
+                        class="compare-btn"
+                        onclick="openProcessModal('{{ image.filename }}')">
+                        Порівняти методи
+                    </button>
                     <button
                         class="delete-btn"
-                        onclick="confirmDelete('{{  image.filename }}')">
-                        Delete
+                        onclick="confirmDelete('{{ image.filename }}')">
+                        Видалити
                     </button>
                 </div>
-            {% else %}
-                <p>Поки що немає завантажених зображень.</p>
             {% endfor %}
         </div>
+        {% else %}
+        <p class="empty-msg">Поки що немає завантажених зображень.</p>
+        {% endif %}
+
+        <!-- Image view modal -->
         <div id="imageModal" class="modal">
-            <span class="close-btn">&times;</span>
+            <span class="close-btn" id="imageCloseBtn">&times;</span>
             <img class="modal-content" id="fullImage">
             <div id="caption"></div>
         </div>
+
+        <!-- Processing modal -->
+        <div id="processModal" class="modal process-modal">
+            <div class="process-modal-content">
+                <span class="close-btn process-close-btn" id="processCloseBtn">&times;</span>
+                <h2>Порівняння методів: <em id="processFilename"></em></h2>
+
+                <button id="runBtn" onclick="runProcessing()">Обробити</button>
+
+                <div id="processSpinner" class="spinner-container" style="display:none">
+                    <div class="spinner"></div>
+                    <p>Обробка зображення...</p>
+                </div>
+
+                <div id="processResults" style="display:none">
+                    <div class="comparison">
+                        <div class="comparison-panel">
+                            <h3>Класичний метод (Canny)</h3>
+                            <img id="classicalImg" src="" alt="Canny result">
+                            <div class="metrics">
+                                <span>Час: <strong id="classicalTime"></strong> мс</span>
+                                <span>SNR: <strong id="classicalSNR"></strong></span>
+                            </div>
+                        </div>
+                        <div class="comparison-panel">
+                            <h3>Метод Sobel</h3>
+                            <img id="secondaryImg" src="" alt="Sobel result">
+                            <div class="metrics">
+                                <span>Час: <strong id="secondaryTime"></strong> мс</span>
+                                <span>SNR: <strong id="secondarySNR"></strong></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <script src="/static/js/script.js"></script>
     </body>
 </html>

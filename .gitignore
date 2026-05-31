@@ -4,3 +4,5 @@ static/uploads/
 *.env
 .vscode/
 .pytest_cache/
+*.md
+static/processed/
