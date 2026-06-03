@@ -962,3 +962,66 @@ button:disabled {
 .info-metrics strong {
     color: var(--accent);
 }
+
+/* ── Metrics comparison table ─────────────────────────────────────────────── */
+.metrics-table-wrap {
+    margin-top: 20px;
+    overflow-x: auto;
+    max-width: 520px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.metrics-cmp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    table-layout: fixed;
+}
+
+.metrics-cmp-table th,
+.metrics-cmp-table td {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-soft);
+}
+
+.metrics-cmp-table th {
+    background: var(--surface-alt);
+    font-weight: 700;
+    color: var(--text-mid);
+    border-bottom: 2px solid var(--border-alt);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Name column: takes remaining space, left-aligned */
+.metrics-cmp-table th:first-child,
+.metrics-cmp-table td:first-child {
+    text-align: left;
+    width: auto;
+    color: var(--text-soft);
+}
+
+/* Value columns: fixed width, center-aligned */
+.metrics-cmp-table th:not(:first-child) {
+    width: 130px;
+    text-align: center;
+}
+
+.metrics-cmp-table td:not(:first-child) {
+    width: 130px;
+    text-align: center;
+    font-weight: 600;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.metrics-cmp-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.metrics-cmp-table tbody tr:hover td {
+    background: rgba(91, 107, 255, 0.05);
+}

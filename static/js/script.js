@@ -67,6 +67,60 @@ function switchGallery(target) {
     });
 }
 
+// ── Metrics helpers ────────────────────────────────────────────────────────────
+
+// [apiKey, pm-frac-id, pm-sobel-id, rm-frac-id, rm-sobel-id, dataset-frac-key, dataset-sobel-key, formatter]
+const METRICS_DEF = [
+    ["edge_density",          "pmFracDensity",  "pmSobelDensity",  "rmFracDensity",  "rmSobelDensity",  "fracEdgeDensity",    "sobelEdgeDensity",    v => v.toFixed(4)],
+    ["mean_edge_strength",    "pmFracStrength", "pmSobelStrength", "rmFracStrength", "rmSobelStrength", "fracMeanStrength",   "sobelMeanStrength",   v => v.toFixed(4)],
+    ["num_components",        "pmFracNumComp",  "pmSobelNumComp",  "rmFracNumComp",  "rmSobelNumComp",  "fracNumComp",        "sobelNumComp",        v => String(Math.round(v))],
+    ["mean_component_length", "pmFracMeanLen",  "pmSobelMeanLen",  "rmFracMeanLen",  "rmSobelMeanLen",  "fracMeanLen",        "sobelMeanLen",        v => v.toFixed(1)],
+    ["fragmentation",         "pmFracFrag",     "pmSobelFrag",     "rmFracFrag",     "rmSobelFrag",     "fracFrag",           "sobelFrag",           v => v.toFixed(6)],
+    ["contrast_ratio",        "pmFracContrast", "pmSobelContrast", "rmFracContrast", "rmSobelContrast", "fracContrast",       "sobelContrast",       v => v.toFixed(4)],
+];
+
+function _fmtMetric(val, fmt) {
+    if (val === null || val === undefined || val === "" || val === "—") return "—";
+    const n = parseFloat(val);
+    return isNaN(n) ? "—" : fmt(n);
+}
+
+/** Update the GL-Canny column of the processing-modal metrics table. */
+function _updatePmFrac(m) {
+    METRICS_DEF.forEach(([key, fracId, , , , , , fmt]) => {
+        const el = document.getElementById(fracId);
+        if (el) el.textContent = _fmtMetric(m[key], fmt);
+    });
+}
+
+/** Update the Sobel column of the processing-modal metrics table. */
+function _updatePmSobel(m) {
+    METRICS_DEF.forEach(([key, , sobelId, , , , , fmt]) => {
+        const el = document.getElementById(sobelId);
+        if (el) el.textContent = _fmtMetric(m[key], fmt);
+    });
+}
+
+/** Reset all processing-modal metric cells to "—". */
+function _resetPmMetrics() {
+    METRICS_DEF.forEach(([, fracId, sobelId]) => {
+        const f = document.getElementById(fracId);
+        const s = document.getElementById(sobelId);
+        if (f) f.textContent = "—";
+        if (s) s.textContent = "—";
+    });
+}
+
+/** Populate the results-modal metrics table from a result card's dataset. */
+function _populateRmMetrics(d) {
+    METRICS_DEF.forEach(([, , , rmFracId, rmSobelId, dsFracKey, dsSobelKey, fmt]) => {
+        const fEl = document.getElementById(rmFracId);
+        const sEl = document.getElementById(rmSobelId);
+        if (fEl) fEl.textContent = _fmtMetric(d[dsFracKey], fmt);
+        if (sEl) sEl.textContent = _fmtMetric(d[dsSobelKey], fmt);
+    });
+}
+
 // ── Saved-result comparison modal ───────────────────────────────────────────────
 const resultsModal = document.getElementById("resultsModal");
 const resultsCloseBtn = document.getElementById("resultsCloseBtn");
@@ -86,11 +140,11 @@ function openResultsModal(card) {
 
     document.getElementById("resFracImg").src = d.fracUrl;
     document.getElementById("resFracTime").textContent = d.fracTime;
-    document.getElementById("resFracSNR").textContent = d.fracSnr;
 
     document.getElementById("resSobelImg").src = d.sobelUrl;
     document.getElementById("resSobelTime").textContent = d.sobelTime;
-    document.getElementById("resSobelSNR").textContent = d.sobelSnr;
+
+    _populateRmMetrics(d);
 
     resetZoom();
     resultsModal.style.display = "flex";
@@ -260,24 +314,20 @@ function openProcessModal(filename) {
     currentFilename = filename;
     document.getElementById("processFilename").textContent = filename;
 
-    // Скидаємо повзунок до α = 0.5
     alphaSlider.value = "0.5";
     alphaValue.textContent = "0.5";
     fracAlphaLabel.textContent = "0.5";
 
-    // Ховаємо попередні результати й показуємо спінер (без миготіння старого фото)
     document.getElementById("processResults").style.display = "none";
     document.getElementById("classicalImg").src = "";
     document.getElementById("secondaryImg").src = "";
     document.getElementById("classicalTime").textContent = "—";
-    document.getElementById("classicalSNR").textContent = "—";
     document.getElementById("secondaryTime").textContent = "—";
-    document.getElementById("secondarySNR").textContent = "—";
+    _resetPmMetrics();
     document.getElementById("processSpinner").style.display = "block";
 
     processModal.style.display = "flex";
     lockScroll();
-    // Одразу обробляємо обидва методи (дробовий α=0.5 + Sobel)
     previewBoth();
 }
 
@@ -293,7 +343,7 @@ processModal.onclick = function (event) {
     }
 };
 
-// ── Повзунок α: real-time превʼю дробового методу ────────────────────────────────
+// ── Alpha slider: real-time fractional preview ────────────────────────────────
 const alphaSlider = document.getElementById("alphaSlider");
 const alphaValue = document.getElementById("alphaValue");
 const fracAlphaLabel = document.getElementById("fracAlphaLabel");
@@ -318,17 +368,17 @@ function _applyFractional(frac) {
     img.src = frac.data_url;
     img.style.opacity = "1";
     document.getElementById("classicalTime").textContent = frac.time_ms;
-    document.getElementById("classicalSNR").textContent = frac.snr;
     fracAlphaLabel.textContent = parseFloat(frac.alpha).toFixed(1);
+    _updatePmFrac(frac);
 }
 
 function _applySobel(sobel) {
     document.getElementById("secondaryImg").src = sobel.data_url;
     document.getElementById("secondaryTime").textContent = sobel.time_ms;
-    document.getElementById("secondarySNR").textContent = sobel.snr;
+    _updatePmSobel(sobel);
 }
 
-// Початкове превʼю при відкритті вікна: обидва методи одразу (без запису в БД)
+// Initial preview on modal open: both methods at once (no DB write)
 async function previewBoth() {
     if (!currentFilename) return;
 
@@ -360,7 +410,7 @@ async function previewBoth() {
     }
 }
 
-// Превʼю лише дробового методу — для руху повзунка α
+// Preview only the fractional method — triggered by alpha slider movement
 async function previewFractional() {
     if (!currentFilename) return;
 
@@ -380,13 +430,13 @@ async function previewFractional() {
         }
 
         const data = await response.json();
-        if (seq !== previewSeq) return;  // прийшла застаріла відповідь — ігноруємо
+        if (seq !== previewSeq) return;
 
         _applyFractional(data.fractional);
     } catch (err) {
         if (seq === previewSeq) {
             document.getElementById("classicalTime").textContent = "—";
-            document.getElementById("classicalSNR").textContent = "—";
+            _resetPmMetrics();
         }
     } finally {
         if (seq === previewSeq) img.style.opacity = "1";
@@ -399,34 +449,35 @@ function _formatNow() {
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function _fmtSnr(v) {
-    return (v === null || v === undefined) ? "—" : parseFloat(v).toFixed(2);
-}
-
 function _insertResultCard(filename, data) {
-    const alpha = parseFloat(data.classical.alpha).toFixed(1);
+    const alpha    = parseFloat(data.classical.alpha).toFixed(1);
     const fracUrl  = data.classical.url;
     const sobelUrl = data.secondary.url;
     const origUrl  = `/static/uploads/${encodeURIComponent(filename)}`;
     const fracTime  = parseFloat(data.classical.time_ms).toFixed(1);
     const sobelTime = parseFloat(data.secondary.time_ms).toFixed(1);
-    const fracSnr   = _fmtSnr(data.classical.snr);
-    const sobelSnr  = _fmtSnr(data.secondary.snr);
     const date = _formatNow();
 
     const card = document.createElement("div");
     card.className = "result-card";
-    card.dataset.id       = data.id;
-    card.dataset.source   = filename;
-    card.dataset.origUrl  = origUrl;
-    card.dataset.alpha    = alpha;
-    card.dataset.fracUrl  = fracUrl;
-    card.dataset.fracTime = fracTime;
-    card.dataset.fracSnr  = fracSnr;
+    card.dataset.id        = data.id;
+    card.dataset.source    = filename;
+    card.dataset.origUrl   = origUrl;
+    card.dataset.alpha     = alpha;
+    card.dataset.fracUrl   = fracUrl;
+    card.dataset.fracTime  = fracTime;
     card.dataset.sobelUrl  = sobelUrl;
     card.dataset.sobelTime = sobelTime;
-    card.dataset.sobelSnr  = sobelSnr;
-    card.dataset.date = date;
+    card.dataset.date      = date;
+
+    // Store all new metrics in dataset
+    METRICS_DEF.forEach(([key, , , , , dsFracKey, dsSobelKey]) => {
+        const fracVal  = data.classical[key];
+        const sobelVal = data.secondary[key];
+        card.dataset[dsFracKey]  = (fracVal  !== undefined && fracVal  !== null) ? fracVal  : "";
+        card.dataset[dsSobelKey] = (sobelVal !== undefined && sobelVal !== null) ? sobelVal : "";
+    });
+
     card.setAttribute("onclick", "openResultsModal(this)");
 
     const fallback = `this.onerror=null;this.src=window.ORIG_FALLBACK`;
@@ -447,11 +498,9 @@ function _insertResultCard(filename, data) {
 
     const gallery = document.getElementById("resultsGallery");
 
-    // Remove empty-msg placeholder if present
     const empty = gallery.querySelector(".empty-msg");
     if (empty) empty.remove();
 
-    // Create the grid if this is the very first result
     let grid = gallery.querySelector(".results-grid");
     if (!grid) {
         grid = document.createElement("div");
@@ -461,7 +510,6 @@ function _insertResultCard(filename, data) {
 
     grid.prepend(card);
 
-    // Enable the CSV export button if it was disabled
     const csvBtn = document.querySelector(".btn-export-disabled");
     if (csvBtn) {
         const link = document.createElement("a");
@@ -498,12 +546,13 @@ async function runProcessing() {
         document.getElementById("classicalImg").src = data.classical.url;
         document.getElementById("classicalImg").style.opacity = "1";
         document.getElementById("classicalTime").textContent = data.classical.time_ms;
-        document.getElementById("classicalSNR").textContent = data.classical.snr;
         fracAlphaLabel.textContent = parseFloat(data.classical.alpha).toFixed(1);
 
         document.getElementById("secondaryImg").src = data.secondary.url;
         document.getElementById("secondaryTime").textContent = data.secondary.time_ms;
-        document.getElementById("secondarySNR").textContent = data.secondary.snr;
+
+        _updatePmFrac(data.classical);
+        _updatePmSobel(data.secondary);
 
         document.getElementById("processResults").style.display = "block";
 

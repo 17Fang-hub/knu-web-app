@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select, func
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from database import engine, AsyncSessionLocal, Base
@@ -17,6 +17,35 @@ from models import Image, ProcessingResult
 from processing import process_both, fractional_preview, sobel_preview, DEFAULT_ALPHA
 
 ALPHA_MIN, ALPHA_MAX = 0.1, 1.9
+
+_NEW_COLUMNS = [
+    ("fractional_edge_density",          "REAL"),
+    ("fractional_mean_edge_strength",     "REAL"),
+    ("fractional_num_components",         "INTEGER"),
+    ("fractional_mean_component_length",  "REAL"),
+    ("fractional_fragmentation",          "REAL"),
+    ("fractional_contrast_ratio",         "REAL"),
+    ("sobel_edge_density",               "REAL"),
+    ("sobel_mean_edge_strength",          "REAL"),
+    ("sobel_num_components",             "INTEGER"),
+    ("sobel_mean_component_length",       "REAL"),
+    ("sobel_fragmentation",              "REAL"),
+    ("sobel_contrast_ratio",             "REAL"),
+]
+
+
+async def _run_migrations(conn) -> None:
+    """Idempotently add new metric columns to processing_results."""
+    for col_name, col_type in _NEW_COLUMNS:
+        try:
+            await conn.execute(
+                text(
+                    f"ALTER TABLE processing_results "
+                    f"ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
+                )
+            )
+        except Exception:
+            pass
 
 
 def _clamp_alpha(alpha: float) -> float:
@@ -34,6 +63,7 @@ PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _run_migrations(conn)
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(Image))
@@ -133,8 +163,8 @@ async def delete_image(filename: str):
 @app.post("/preview/{filename}")
 async def preview_image(filename: str, alpha: float = DEFAULT_ALPHA, with_sobel: bool = False):
     """
-    Швидке превʼю (без запису в БД/на диск). Дробовий метод рахується завжди
-    (для повзунка α); Sobel — лише за with_sobel=true (при відкритті вікна).
+    Quick preview (no DB/disk write). Fractional method is always computed
+    (for the alpha slider); Sobel only when with_sobel=true (on modal open).
     """
     file_path = UPLOAD_DIR / filename
     if not file_path.exists():
@@ -154,17 +184,29 @@ async def process_image(filename: str, alpha: float = DEFAULT_ALPHA):
         return JSONResponse(status_code=404, content={"error": "Файл не знайдено"})
 
     result = process_both(file_path, PROCESSED_DIR, alpha=_clamp_alpha(alpha))
+    cl = result["classical"]
+    sc = result["secondary"]
 
     async with AsyncSessionLocal() as session:
         record = ProcessingResult(
             source_filename=filename,
-            fractional_filename=result["classical"]["filename"],
-            fractional_time_ms=result["classical"]["time_ms"],
-            fractional_snr=result["classical"]["snr"],
-            fractional_alpha=result["classical"]["alpha"],
-            sobel_filename=result["secondary"]["filename"],
-            sobel_time_ms=result["secondary"]["time_ms"],
-            sobel_snr=result["secondary"]["snr"],
+            fractional_filename=cl["filename"],
+            fractional_time_ms=cl["time_ms"],
+            fractional_alpha=cl["alpha"],
+            fractional_edge_density=cl["edge_density"],
+            fractional_mean_edge_strength=cl["mean_edge_strength"],
+            fractional_num_components=cl["num_components"],
+            fractional_mean_component_length=cl["mean_component_length"],
+            fractional_fragmentation=cl["fragmentation"],
+            fractional_contrast_ratio=cl["contrast_ratio"],
+            sobel_filename=sc["filename"],
+            sobel_time_ms=sc["time_ms"],
+            sobel_edge_density=sc["edge_density"],
+            sobel_mean_edge_strength=sc["mean_edge_strength"],
+            sobel_num_components=sc["num_components"],
+            sobel_mean_component_length=sc["mean_component_length"],
+            sobel_fragmentation=sc["fragmentation"],
+            sobel_contrast_ratio=sc["contrast_ratio"],
         )
         session.add(record)
         await session.commit()
@@ -172,15 +214,25 @@ async def process_image(filename: str, alpha: float = DEFAULT_ALPHA):
     return JSONResponse({
         "id": record.id,
         "classical": {
-            "url": f"/static/processed/{result['classical']['filename']}",
-            "time_ms": result["classical"]["time_ms"],
-            "snr": result["classical"]["snr"],
-            "alpha": result["classical"]["alpha"],
+            "url": f"/static/processed/{cl['filename']}",
+            "time_ms": cl["time_ms"],
+            "alpha": cl["alpha"],
+            "edge_density": cl["edge_density"],
+            "mean_edge_strength": cl["mean_edge_strength"],
+            "num_components": cl["num_components"],
+            "mean_component_length": cl["mean_component_length"],
+            "fragmentation": cl["fragmentation"],
+            "contrast_ratio": cl["contrast_ratio"],
         },
         "secondary": {
-            "url": f"/static/processed/{result['secondary']['filename']}",
-            "time_ms": result["secondary"]["time_ms"],
-            "snr": result["secondary"]["snr"],
+            "url": f"/static/processed/{sc['filename']}",
+            "time_ms": sc["time_ms"],
+            "edge_density": sc["edge_density"],
+            "mean_edge_strength": sc["mean_edge_strength"],
+            "num_components": sc["num_components"],
+            "mean_component_length": sc["mean_component_length"],
+            "fragmentation": sc["fragmentation"],
+            "contrast_ratio": sc["contrast_ratio"],
         },
     })
 
@@ -196,7 +248,7 @@ async def delete_result(result_id: int):
             return JSONResponse(status_code=404, content={"error": "Запис не знайдено"})
 
         for filename in (record.fractional_filename, record.sobel_filename):
-            p = PROCESSED_DIR / filename
+            p = PROCESSED_DIR / str(filename)
             if p.exists():
                 os.remove(p)
 
@@ -214,24 +266,49 @@ async def export_csv():
         )
         records = result.scalars().all()
 
+    def _v(x):
+        return "" if x is None else x
+
     output = io.StringIO()
     output.write('﻿')
     writer = csv.writer(output)
     writer.writerow([
         "Назва фото",
         "α (дробова)",
-        "Час Дробовий (мс)", "SNR Дробовий",
-        "Час Sobel (мс)", "SNR Sobel",
+        "Час GL-Canny (мс)",
+        "Edge density GL-Canny",
+        "Mean edge strength GL-Canny",
+        "Кількість компонент GL-Canny",
+        "Середня довжина GL-Canny (px)",
+        "Фрагментація GL-Canny",
+        "Контрастність GL-Canny",
+        "Час Sobel (мс)",
+        "Edge density Sobel",
+        "Mean edge strength Sobel",
+        "Кількість компонент Sobel",
+        "Середня довжина Sobel (px)",
+        "Фрагментація Sobel",
+        "Контрастність Sobel",
         "Дата обробки",
     ])
     for r in records:
         writer.writerow([
             r.source_filename,
-            r.fractional_alpha if r.fractional_alpha is not None else "",
+            _v(r.fractional_alpha),
             r.fractional_time_ms,
-            r.fractional_snr,
+            _v(r.fractional_edge_density),
+            _v(r.fractional_mean_edge_strength),
+            _v(r.fractional_num_components),
+            _v(r.fractional_mean_component_length),
+            _v(r.fractional_fragmentation),
+            _v(r.fractional_contrast_ratio),
             r.sobel_time_ms,
-            r.sobel_snr,
+            _v(r.sobel_edge_density),
+            _v(r.sobel_mean_edge_strength),
+            _v(r.sobel_num_components),
+            _v(r.sobel_mean_component_length),
+            _v(r.sobel_fragmentation),
+            _v(r.sobel_contrast_ratio),
             r.processed_at.strftime("%Y-%m-%d %H:%M:%S") if r.processed_at is not None else "",
         ])
 

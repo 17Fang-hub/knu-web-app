@@ -121,7 +121,11 @@ async def test_process_image(client, tmp_path):
     assert "secondary" in data
     assert "url" in data["classical"]
     assert "time_ms" in data["classical"]
-    assert "snr" in data["classical"]
+    assert "alpha" in data["classical"]
+    assert "edge_density" in data["classical"]
+    assert "mean_edge_strength" in data["classical"]
+    assert "num_components" in data["classical"]
+    assert "edge_density" in data["secondary"]
 
 
 @pytest.mark.asyncio
@@ -158,6 +162,7 @@ async def test_export_csv_with_data(client, tmp_path):
     assert response.status_code == 200
     content = response.text
     assert "csv_test.jpg" in content
+    assert "Edge density GL-Canny" in content
 
 
 # ── preview (повзунок α) ─────────────────────────────────────────────────────────

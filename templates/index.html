@@ -129,10 +129,20 @@
                         data-alpha="{{ '%.1f'|format(r.fractional_alpha) if r.fractional_alpha is not none else '—' }}"
                         data-frac-url="/static/processed/{{ r.fractional_filename }}"
                         data-frac-time="{{ '%.1f'|format(r.fractional_time_ms) }}"
-                        data-frac-snr="{{ '%.2f'|format(r.fractional_snr) if r.fractional_snr is not none else '—' }}"
+                        data-frac-edge-density="{{ '%.6f'|format(r.fractional_edge_density) if r.fractional_edge_density is not none else '' }}"
+                        data-frac-mean-strength="{{ '%.6f'|format(r.fractional_mean_edge_strength) if r.fractional_mean_edge_strength is not none else '' }}"
+                        data-frac-num-comp="{{ r.fractional_num_components if r.fractional_num_components is not none else '' }}"
+                        data-frac-mean-len="{{ '%.6f'|format(r.fractional_mean_component_length) if r.fractional_mean_component_length is not none else '' }}"
+                        data-frac-frag="{{ '%.6f'|format(r.fractional_fragmentation) if r.fractional_fragmentation is not none else '' }}"
+                        data-frac-contrast="{{ '%.6f'|format(r.fractional_contrast_ratio) if r.fractional_contrast_ratio is not none else '' }}"
                         data-sobel-url="/static/processed/{{ r.sobel_filename }}"
                         data-sobel-time="{{ '%.1f'|format(r.sobel_time_ms) }}"
-                        data-sobel-snr="{{ '%.2f'|format(r.sobel_snr) if r.sobel_snr is not none else '—' }}"
+                        data-sobel-edge-density="{{ '%.6f'|format(r.sobel_edge_density) if r.sobel_edge_density is not none else '' }}"
+                        data-sobel-mean-strength="{{ '%.6f'|format(r.sobel_mean_edge_strength) if r.sobel_mean_edge_strength is not none else '' }}"
+                        data-sobel-num-comp="{{ r.sobel_num_components if r.sobel_num_components is not none else '' }}"
+                        data-sobel-mean-len="{{ '%.6f'|format(r.sobel_mean_component_length) if r.sobel_mean_component_length is not none else '' }}"
+                        data-sobel-frag="{{ '%.6f'|format(r.sobel_fragmentation) if r.sobel_fragmentation is not none else '' }}"
+                        data-sobel-contrast="{{ '%.6f'|format(r.sobel_contrast_ratio) if r.sobel_contrast_ratio is not none else '' }}"
                         data-date="{{ r.processed_at.strftime('%Y-%m-%d %H:%M') if r.processed_at else '' }}"
                         onclick="openResultsModal(this)">
                         <div class="result-thumbs">
@@ -194,21 +204,38 @@
                 <div id="processResults" style="display:none">
                     <div class="comparison">
                         <div class="comparison-panel">
-                            <h3>Метод дробових похідних (α=<span id="fracAlphaLabel">0.5</span>)</h3>
+                            <h3>GL-Canny (α=<span id="fracAlphaLabel">0.5</span>)</h3>
                             <img id="classicalImg" src="" alt="Fractional derivative result">
                             <div class="metrics">
-                                <span>Час: <strong id="classicalTime"></strong> мс</span>
-                                <span>SNR: <strong id="classicalSNR"></strong></span>
+                                <span>Час: <strong id="classicalTime">—</strong> мс</span>
                             </div>
                         </div>
                         <div class="comparison-panel">
                             <h3>Метод Sobel</h3>
                             <img id="secondaryImg" src="" alt="Sobel result">
                             <div class="metrics">
-                                <span>Час: <strong id="secondaryTime"></strong> мс</span>
-                                <span>SNR: <strong id="secondarySNR"></strong></span>
+                                <span>Час: <strong id="secondaryTime">—</strong> мс</span>
                             </div>
                         </div>
+                    </div>
+                    <div class="metrics-table-wrap">
+                        <table class="metrics-cmp-table">
+                            <thead>
+                                <tr>
+                                    <th class="metrics-th-name">Метрика</th>
+                                    <th>GL-Canny</th>
+                                    <th>Sobel</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>Edge density</td><td id="pmFracDensity">—</td><td id="pmSobelDensity">—</td></tr>
+                                <tr><td>Mean edge strength</td><td id="pmFracStrength">—</td><td id="pmSobelStrength">—</td></tr>
+                                <tr><td>Кількість компонент</td><td id="pmFracNumComp">—</td><td id="pmSobelNumComp">—</td></tr>
+                                <tr><td>Середня довжина (px)</td><td id="pmFracMeanLen">—</td><td id="pmSobelMeanLen">—</td></tr>
+                                <tr><td>Фрагментація</td><td id="pmFracFrag">—</td><td id="pmSobelFrag">—</td></tr>
+                                <tr><td>Контрастність країв</td><td id="pmFracContrast">—</td><td id="pmSobelContrast">—</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -247,7 +274,6 @@
                         </div>
                         <div class="metrics">
                             <span>Час: <strong id="resFracTime"></strong> мс</span>
-                            <span>SNR: <strong id="resFracSNR"></strong></span>
                         </div>
                     </div>
                     <div class="comparison-panel">
@@ -257,11 +283,29 @@
                         </div>
                         <div class="metrics">
                             <span>Час: <strong id="resSobelTime"></strong> мс</span>
-                            <span>SNR: <strong id="resSobelSNR"></strong></span>
                         </div>
                     </div>
                 </div>
                 <p class="zoom-hint">🔍 Наведіть курсор на будь-яке зображення — обидва синхронно збільшаться у тій самій точці</p>
+                <div class="metrics-table-wrap">
+                    <table class="metrics-cmp-table">
+                        <thead>
+                            <tr>
+                                <th class="metrics-th-name">Метрика</th>
+                                <th>GL-Canny</th>
+                                <th>Sobel</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Edge density</td><td id="rmFracDensity">—</td><td id="rmSobelDensity">—</td></tr>
+                            <tr><td>Mean edge strength</td><td id="rmFracStrength">—</td><td id="rmSobelStrength">—</td></tr>
+                            <tr><td>Кількість компонент</td><td id="rmFracNumComp">—</td><td id="rmSobelNumComp">—</td></tr>
+                            <tr><td>Середня довжина (px)</td><td id="rmFracMeanLen">—</td><td id="rmSobelMeanLen">—</td></tr>
+                            <tr><td>Фрагментація</td><td id="rmFracFrag">—</td><td id="rmSobelFrag">—</td></tr>
+                            <tr><td>Контрастність країв</td><td id="rmFracContrast">—</td><td id="rmSobelContrast">—</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
@@ -289,13 +333,13 @@
                 </section>
 
                 <section class="info-section">
-                    <h3>2. Дробовий детектор Канні (Grünwald–Letnikov)</h3>
+                    <h3>2. Дробовий детектор Canny (Grünwald–Letnikov)</h3>
                     <p>
-                        Розширення класичного алгоритму Канні, у якому цілочисельна похідна замінена
+                        Розширення класичного алгоритму Canny, у якому цілочисельна похідна замінена
                         на <strong>дробову порядку α</strong>. Маски градієнта будуються з коефіцієнтів
                         <strong>Грюнвальда–Летнікова</strong> (рекурентна формула) — це антисиметричні
                         ядра (2n+1)&times;(2n+1) з трикутним зважуванням рядків. Далі застосовується повний
-                        конвеєр Канні: об'єднання поканальних градієнтів за L2-нормою, придушення
+                        конвеєр Canny: об'єднання поканальних градієнтів за L2-нормою, придушення
                         немаксимумів уздовж напрямку градієнта, подвійне порогування з гістерезисом
                         і зв'язування контурів через зв'язні компоненти; верхній поріг визначається
                         автоматично методом Оцу (Otsu).
@@ -311,15 +355,34 @@
                     <h3>3. Метрики оцінювання</h3>
                     <ul class="info-metrics">
                         <li>
-                            <strong>SNR (відношення сигнал/шум)</strong> — відношення середньої яскравості
-                            пікселів, що потрапили в контур, до стандартного відхилення яскравості фонових
-                            (неконтурних) пікселів вихідного зображення. Чим вище значення, тим чіткіше
-                            контури виділяються на тлі шуму.
+                            <strong>Edge density</strong> — частка пікселів-країв у зображенні (значення в [0, 1]).
+                            Дозволяє оцінити, наскільки «насиченою» є карта країв.
                         </li>
                         <li>
-                            <strong>Час обробки (мс)</strong> — тривалість виконання саме алгоритму
-                            виявлення контурів (без читання та запису файлів), виміряна високоточним
-                            таймером. Дозволяє порівняти обчислювальну вартість методів.
+                            <strong>Mean edge strength</strong> — середнє значення модуля градієнта |G| на
+                            edge-пікселях (нормоване до [0, 1]). Показує, наскільки впевнено метод знаходить
+                            перепади яскравості.
+                        </li>
+                        <li>
+                            <strong>Кількість компонент</strong> — кількість зв'язних компонент (відрізків країв)
+                            у бінарній карті. Менша кількість компонент — довші, безперервніші лінії.
+                        </li>
+                        <li>
+                            <strong>Середня довжина (px)</strong> — середня кількість пікселів у зв'язній
+                            компоненті. Більше значення означає довші та цілісніші контури.
+                        </li>
+                        <li>
+                            <strong>Фрагментація</strong> — відношення кількості компонент до загальної
+                            кількості edge-пікселів. Низьке значення означає безперервні контури.
+                        </li>
+                        <li>
+                            <strong>Контрастність країв</strong> — середня максимальна різниця яскравості між
+                            edge-пікселем та його 4-зв'язними сусідами, нормована до [0, 1]. Відображає чіткість
+                            переходів.
+                        </li>
+                        <li>
+                            <strong>Час обробки (мс)</strong> — тривалість виконання алгоритму виявлення
+                            контурів (без читання та запису файлів), виміряна високоточним таймером.
                         </li>
                     </ul>
                 </section>
