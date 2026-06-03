@@ -22,6 +22,7 @@ from processing import (
     sobel_preview,
     noise_robustness,
     DEFAULT_ALPHA,
+    NOISE_SIGMAS,
 )
 
 ALPHA_MIN, ALPHA_MAX = 0.1, 1.9
@@ -334,7 +335,9 @@ async def delete_result(result_id: int):
 async def export_csv():
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(ProcessingResult).order_by(ProcessingResult.processed_at.desc())
+            select(ProcessingResult)
+            .options(selectinload(ProcessingResult.noise_tests))
+            .order_by(ProcessingResult.processed_at.desc())
         )
         records = result.scalars().all()
 
@@ -344,45 +347,52 @@ async def export_csv():
     output = io.StringIO()
     output.write('﻿')
     writer = csv.writer(output)
-    writer.writerow([
+
+    # Only the essentials: comparison metrics + noise-robustness IoU per σ.
+    header = [
         "Назва фото",
         "α (дробова)",
-        "Час GL-Canny (мс)",
         "Edge density GL-Canny",
         "Mean edge strength GL-Canny",
         "Кількість компонент GL-Canny",
         "Середня довжина GL-Canny (px)",
         "Фрагментація GL-Canny",
         "Контрастність GL-Canny",
-        "Час Sobel (мс)",
         "Edge density Sobel",
         "Mean edge strength Sobel",
         "Кількість компонент Sobel",
         "Середня довжина Sobel (px)",
         "Фрагментація Sobel",
         "Контрастність Sobel",
-        "Дата обробки",
-    ])
+    ]
+    header += [f"IoU GL-Canny (σ={int(s)})" for s in NOISE_SIGMAS]
+    header += [f"IoU Sobel (σ={int(s)})" for s in NOISE_SIGMAS]
+    writer.writerow(header)
+
     for r in records:
-        writer.writerow([
+        # Map σ → IoU for whichever robustness test (if any) was saved.
+        gl_by_sigma = {round(t.noise_sigma): t.gl_canny_iou for t in r.noise_tests}
+        sobel_by_sigma = {round(t.noise_sigma): t.sobel_iou for t in r.noise_tests}
+
+        row = [
             r.source_filename,
             _v(r.fractional_alpha),
-            r.fractional_time_ms,
             _v(r.fractional_edge_density),
             _v(r.fractional_mean_edge_strength),
             _v(r.fractional_num_components),
             _v(r.fractional_mean_component_length),
             _v(r.fractional_fragmentation),
             _v(r.fractional_contrast_ratio),
-            r.sobel_time_ms,
             _v(r.sobel_edge_density),
             _v(r.sobel_mean_edge_strength),
             _v(r.sobel_num_components),
             _v(r.sobel_mean_component_length),
             _v(r.sobel_fragmentation),
             _v(r.sobel_contrast_ratio),
-            r.processed_at.strftime("%Y-%m-%d %H:%M:%S") if r.processed_at is not None else "",
-        ])
+        ]
+        row += [_v(gl_by_sigma.get(round(s))) for s in NOISE_SIGMAS]
+        row += [_v(sobel_by_sigma.get(round(s))) for s in NOISE_SIGMAS]
+        writer.writerow(row)
 
     output.seek(0)
     return StreamingResponse(
