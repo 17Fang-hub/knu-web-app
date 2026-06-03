@@ -170,6 +170,7 @@ async def process_image(filename: str, alpha: float = DEFAULT_ALPHA):
         await session.commit()
 
     return JSONResponse({
+        "id": record.id,
         "classical": {
             "url": f"/static/processed/{result['classical']['filename']}",
             "time_ms": result["classical"]["time_ms"],
@@ -182,6 +183,27 @@ async def process_image(filename: str, alpha: float = DEFAULT_ALPHA):
             "snr": result["secondary"]["snr"],
         },
     })
+
+
+@app.delete("/result/{result_id}")
+async def delete_result(result_id: int):
+    async with AsyncSessionLocal() as session:
+        res = await session.execute(
+            select(ProcessingResult).where(ProcessingResult.id == result_id)
+        )
+        record = res.scalar_one_or_none()
+        if not record:
+            return JSONResponse(status_code=404, content={"error": "Запис не знайдено"})
+
+        for filename in (record.fractional_filename, record.sobel_filename):
+            p = PROCESSED_DIR / filename
+            if p.exists():
+                os.remove(p)
+
+        await session.delete(record)
+        await session.commit()
+
+    return JSONResponse({"ok": True})
 
 
 @app.get("/export-csv")

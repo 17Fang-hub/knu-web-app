@@ -34,6 +34,14 @@
                 updateToggleLabel();
             }
 
+            // Placeholder shown if the source image was deleted from uploads
+            window.ORIG_FALLBACK = "data:image/svg+xml," + encodeURIComponent(
+                "<svg xmlns='http://www.w3.org/2000/svg' width='200' height='150'>"
+                + "<rect width='200' height='150' fill='#1f2531'/>"
+                + "<text x='100' y='75' fill='#7d8696' font-family='sans-serif' font-size='12' "
+                + "text-anchor='middle' dy='.35em'>оригінал видалено</text></svg>"
+            );
+
             document.addEventListener('DOMContentLoaded', function () {
                 updateToggleLabel();
                 document.getElementById('themeToggle').addEventListener('click', toggleTheme);
@@ -47,7 +55,10 @@
                 <span class="brand-icon">◷</span>
                 <h1>Детекція контурів</h1>
             </div>
-            <button class="theme-toggle" id="themeToggle" type="button">☾</button>
+            <div class="header-actions">
+                <button class="theme-toggle info-btn" id="infoBtn" type="button" title="Про програму">i</button>
+                <button class="theme-toggle" id="themeToggle" type="button">☾</button>
+            </div>
         </header>
 
         <div class="upload-section">
@@ -112,7 +123,9 @@
             <div class="gallery results-grid">
                 {% for r in results %}
                     <div class="result-card"
+                        data-id="{{ r.id }}"
                         data-source="{{ r.source_filename }}"
+                        data-orig-url="/static/uploads/{{ r.source_filename }}"
                         data-alpha="{{ '%.1f'|format(r.fractional_alpha) if r.fractional_alpha is not none else '—' }}"
                         data-frac-url="/static/processed/{{ r.fractional_filename }}"
                         data-frac-time="{{ '%.1f'|format(r.fractional_time_ms) }}"
@@ -123,6 +136,8 @@
                         data-date="{{ r.processed_at.strftime('%Y-%m-%d %H:%M') if r.processed_at else '' }}"
                         onclick="openResultsModal(this)">
                         <div class="result-thumbs">
+                            <img src="/static/uploads/{{ r.source_filename }}" alt="Оригінал"
+                                onerror="this.onerror=null;this.src=window.ORIG_FALLBACK">
                             <img src="/static/processed/{{ r.fractional_filename }}" alt="Дробовий">
                             <img src="/static/processed/{{ r.sobel_filename }}" alt="Sobel">
                         </div>
@@ -130,6 +145,10 @@
                             <span class="result-name">{{ r.source_filename }}</span>
                             <span class="result-badge">α = {{ '%.1f'|format(r.fractional_alpha) if r.fractional_alpha is not none else '—' }}</span>
                         </div>
+                        <button class="result-delete-btn"
+                            onclick="event.stopPropagation(); confirmDeleteResult(this.closest('.result-card'))">
+                            Видалити
+                        </button>
                     </div>
                 {% endfor %}
             </div>
@@ -197,15 +216,30 @@
 
         <!-- Saved result comparison modal -->
         <div id="resultsModal" class="modal process-modal">
-            <div class="process-modal-content">
+            <div class="process-modal-content process-modal-content--wide">
                 <span class="close-btn process-close-btn" id="resultsCloseBtn">&times;</span>
                 <h2>Результат обробки: <em id="resultsFilename"></em></h2>
-                <p class="results-meta">
-                    <span class="results-chip">α = <strong id="resultsAlpha">—</strong></span>
-                    <span class="results-chip results-date" id="resultsDate"></span>
-                </p>
+                <div class="results-modal-actions">
+                    <p class="results-meta">
+                        <span class="results-chip">α = <strong id="resultsAlpha">—</strong></span>
+                        <span class="results-chip results-date" id="resultsDate"></span>
+                    </p>
+                    <button class="btn-delete-result" onclick="confirmDeleteResultFromModal()">
+                        🗑 Видалити результат
+                    </button>
+                </div>
 
                 <div class="comparison" id="resultsComparison">
+                    <div class="comparison-panel">
+                        <h3>Оригінал</h3>
+                        <div class="zoom-frame">
+                            <img id="resOrigImg" class="zoom-img" src="" alt="Original image"
+                                onerror="this.onerror=null;this.src=window.ORIG_FALLBACK">
+                        </div>
+                        <div class="metrics">
+                            <span class="metric-muted">Вихідне зображення</span>
+                        </div>
+                    </div>
                     <div class="comparison-panel">
                         <h3>Метод дробових похідних</h3>
                         <div class="zoom-frame">
@@ -228,6 +262,67 @@
                     </div>
                 </div>
                 <p class="zoom-hint">🔍 Наведіть курсор на будь-яке зображення — обидва синхронно збільшаться у тій самій точці</p>
+            </div>
+        </div>
+
+        <!-- Info / about modal -->
+        <div id="infoModal" class="modal info-modal">
+            <div class="info-modal-content">
+                <span class="close-btn process-close-btn" id="infoCloseBtn">&times;</span>
+                <h2>Про програму</h2>
+                <p class="info-intro">
+                    Вебсервіс для виявлення контурів на зображеннях. Для кожного зображення
+                    обчислюються та порівнюються два методи, а їхні результати й кількісні
+                    метрики зберігаються в базі даних.
+                </p>
+
+                <section class="info-section">
+                    <h3>1. Метод Собеля (Sobel)</h3>
+                    <p>
+                        Класичний градієнтний метод. За допомогою двох згорткових масок 3&times;3
+                        обчислюються наближення часткових похідних яскравості по горизонталі (G<sub>x</sub>)
+                        та вертикалі (G<sub>y</sub>). Модуль градієнта |G| = &radic;(G<sub>x</sub>&sup2; + G<sub>y</sub>&sup2;)
+                        відображає силу перепаду яскравості; пікселі, де |G| перевищує поріг, позначаються
+                        як контур. Метод дуже швидкий і простий, але чутливіший до шуму та дає товщі,
+                        менш деталізовані контури.
+                    </p>
+                </section>
+
+                <section class="info-section">
+                    <h3>2. Дробовий детектор Канні (Grünwald–Letnikov)</h3>
+                    <p>
+                        Розширення класичного алгоритму Канні, у якому цілочисельна похідна замінена
+                        на <strong>дробову порядку α</strong>. Маски градієнта будуються з коефіцієнтів
+                        <strong>Грюнвальда–Летнікова</strong> (рекурентна формула) — це антисиметричні
+                        ядра (2n+1)&times;(2n+1) з трикутним зважуванням рядків. Далі застосовується повний
+                        конвеєр Канні: об'єднання поканальних градієнтів за L2-нормою, придушення
+                        немаксимумів уздовж напрямку градієнта, подвійне порогування з гістерезисом
+                        і зв'язування контурів через зв'язні компоненти; верхній поріг визначається
+                        автоматично методом Оцу (Otsu).
+                    </p>
+                    <p>
+                        Параметр <strong>α (0.1–1.9)</strong> керує чутливістю: менші значення підсилюють
+                        слабкі й тонкі контури, а при α=1 метод вироджується у класичний, Sobel-подібний
+                        оператор. Повзунок дозволяє змінювати α у реальному часі.
+                    </p>
+                </section>
+
+                <section class="info-section">
+                    <h3>3. Метрики оцінювання</h3>
+                    <ul class="info-metrics">
+                        <li>
+                            <strong>SNR (відношення сигнал/шум)</strong> — відношення середньої яскравості
+                            пікселів, що потрапили в контур, до стандартного відхилення яскравості фонових
+                            (неконтурних) пікселів вихідного зображення. Чим вище значення, тим чіткіше
+                            контури виділяються на тлі шуму.
+                        </li>
+                        <li>
+                            <strong>Час обробки (мс)</strong> — тривалість виконання саме алгоритму
+                            виявлення контурів (без читання та запису файлів), виміряна високоточним
+                            таймером. Дозволяє порівняти обчислювальну вартість методів.
+                        </li>
+                    </ul>
+                </section>
             </div>
         </div>
 

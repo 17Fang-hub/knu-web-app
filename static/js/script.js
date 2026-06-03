@@ -1,3 +1,7 @@
+// ── Scroll lock ──────────────────────────────────────────────────────────────
+function lockScroll()   { document.body.style.overflow = "hidden"; }
+function unlockScroll() { document.body.style.overflow = ""; }
+
 // ── Image view modal ──────────────────────────────────────────────────────────
 const imageModal = document.getElementById("imageModal");
 const modalImg = document.getElementById("fullImage");
@@ -9,16 +13,41 @@ document.querySelectorAll(".gallery-item img").forEach(img => {
         imageModal.style.display = "flex";
         modalImg.src = this.src;
         captionText.innerHTML = this.alt;
+        lockScroll();
     };
 });
 
 imageCloseBtn.onclick = function () {
     imageModal.style.display = "none";
+    unlockScroll();
 };
 
 imageModal.onclick = function (event) {
     if (event.target === imageModal) {
         imageModal.style.display = "none";
+        unlockScroll();
+    }
+};
+
+// ── Info / about modal ─────────────────────────────────────────────────────────
+const infoModal = document.getElementById("infoModal");
+const infoBtn = document.getElementById("infoBtn");
+const infoCloseBtn = document.getElementById("infoCloseBtn");
+
+infoBtn.onclick = function () {
+    infoModal.style.display = "flex";
+    lockScroll();
+};
+
+infoCloseBtn.onclick = function () {
+    infoModal.style.display = "none";
+    unlockScroll();
+};
+
+infoModal.onclick = function (event) {
+    if (event.target === infoModal) {
+        infoModal.style.display = "none";
+        unlockScroll();
     }
 };
 
@@ -41,13 +70,19 @@ function switchGallery(target) {
 // ── Saved-result comparison modal ───────────────────────────────────────────────
 const resultsModal = document.getElementById("resultsModal");
 const resultsCloseBtn = document.getElementById("resultsCloseBtn");
+let currentResultCard = null;
 
 function openResultsModal(card) {
+    currentResultCard = card;
     const d = card.dataset;
 
     document.getElementById("resultsFilename").textContent = d.source;
     document.getElementById("resultsAlpha").textContent = d.alpha;
     document.getElementById("resultsDate").textContent = d.date;
+
+    const origImg = document.getElementById("resOrigImg");
+    origImg.onerror = function () { origImg.onerror = null; origImg.src = window.ORIG_FALLBACK; };
+    origImg.src = d.origUrl;
 
     document.getElementById("resFracImg").src = d.fracUrl;
     document.getElementById("resFracTime").textContent = d.fracTime;
@@ -59,23 +94,69 @@ function openResultsModal(card) {
 
     resetZoom();
     resultsModal.style.display = "flex";
+    lockScroll();
 }
 
-resultsCloseBtn.onclick = function () {
+function _closeResultsModal() {
     resultsModal.style.display = "none";
     resetZoom();
-};
+    unlockScroll();
+}
+
+resultsCloseBtn.onclick = _closeResultsModal;
 
 resultsModal.onclick = function (event) {
-    if (event.target === resultsModal) {
-        resultsModal.style.display = "none";
-        resetZoom();
-    }
+    if (event.target === resultsModal) _closeResultsModal();
 };
+
+// ── Delete result ─────────────────────────────────────────────────────────────
+async function _doDeleteResult(card) {
+    const id = card.dataset.id;
+    const response = await fetch(`/result/${id}`, { method: "DELETE" });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        alert("Помилка видалення: " + (err.error || response.status));
+        return;
+    }
+
+    card.remove();
+
+    const grid = document.querySelector("#resultsGallery .results-grid");
+    if (grid && grid.children.length === 0) {
+        grid.remove();
+        const msg = document.createElement("p");
+        msg.className = "empty-msg";
+        msg.textContent = "Поки що немає збережених результатів обробки.";
+        document.getElementById("resultsGallery").appendChild(msg);
+
+        const csvBtn = document.querySelector(".btn-export");
+        if (csvBtn) {
+            const span = document.createElement("span");
+            span.className = "btn-export btn-export-disabled";
+            span.innerHTML = "&#x2193; Експортувати результати (CSV)";
+            csvBtn.replaceWith(span);
+        }
+    }
+}
+
+function confirmDeleteResult(card) {
+    if (!confirm(`Видалити результат обробки «${card.dataset.source}»?`)) return;
+    _doDeleteResult(card);
+}
+
+function confirmDeleteResultFromModal() {
+    if (!currentResultCard) return;
+    if (!confirm(`Видалити результат обробки «${currentResultCard.dataset.source}»?`)) return;
+    const card = currentResultCard;
+    _closeResultsModal();
+    currentResultCard = null;
+    _doDeleteResult(card);
+}
 
 // ── Synchronized magnifier: hover one image → both zoom in at same point ──────────
 const ZOOM_FACTOR = 2.4;
 const zoomImgs = [
+    document.getElementById("resOrigImg"),
     document.getElementById("resFracImg"),
     document.getElementById("resSobelImg"),
 ];
@@ -195,17 +276,20 @@ function openProcessModal(filename) {
     document.getElementById("processSpinner").style.display = "block";
 
     processModal.style.display = "flex";
+    lockScroll();
     // Одразу обробляємо обидва методи (дробовий α=0.5 + Sobel)
     previewBoth();
 }
 
 processCloseBtn.onclick = function () {
     processModal.style.display = "none";
+    unlockScroll();
 };
 
 processModal.onclick = function (event) {
     if (event.target === processModal) {
         processModal.style.display = "none";
+        unlockScroll();
     }
 };
 
@@ -309,14 +393,94 @@ async function previewFractional() {
     }
 }
 
+function _formatNow() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function _fmtSnr(v) {
+    return (v === null || v === undefined) ? "—" : parseFloat(v).toFixed(2);
+}
+
+function _insertResultCard(filename, data) {
+    const alpha = parseFloat(data.classical.alpha).toFixed(1);
+    const fracUrl  = data.classical.url;
+    const sobelUrl = data.secondary.url;
+    const origUrl  = `/static/uploads/${encodeURIComponent(filename)}`;
+    const fracTime  = parseFloat(data.classical.time_ms).toFixed(1);
+    const sobelTime = parseFloat(data.secondary.time_ms).toFixed(1);
+    const fracSnr   = _fmtSnr(data.classical.snr);
+    const sobelSnr  = _fmtSnr(data.secondary.snr);
+    const date = _formatNow();
+
+    const card = document.createElement("div");
+    card.className = "result-card";
+    card.dataset.id       = data.id;
+    card.dataset.source   = filename;
+    card.dataset.origUrl  = origUrl;
+    card.dataset.alpha    = alpha;
+    card.dataset.fracUrl  = fracUrl;
+    card.dataset.fracTime = fracTime;
+    card.dataset.fracSnr  = fracSnr;
+    card.dataset.sobelUrl  = sobelUrl;
+    card.dataset.sobelTime = sobelTime;
+    card.dataset.sobelSnr  = sobelSnr;
+    card.dataset.date = date;
+    card.setAttribute("onclick", "openResultsModal(this)");
+
+    const fallback = `this.onerror=null;this.src=window.ORIG_FALLBACK`;
+    card.innerHTML = `
+        <div class="result-thumbs">
+            <img src="${origUrl}" alt="Оригінал" onerror="${fallback}">
+            <img src="${fracUrl}" alt="Дробовий">
+            <img src="${sobelUrl}" alt="Sobel">
+        </div>
+        <div class="result-info">
+            <span class="result-name">${filename}</span>
+            <span class="result-badge">α = ${alpha}</span>
+        </div>
+        <button class="result-delete-btn"
+            onclick="event.stopPropagation(); confirmDeleteResult(this.closest('.result-card'))">
+            Видалити
+        </button>`;
+
+    const gallery = document.getElementById("resultsGallery");
+
+    // Remove empty-msg placeholder if present
+    const empty = gallery.querySelector(".empty-msg");
+    if (empty) empty.remove();
+
+    // Create the grid if this is the very first result
+    let grid = gallery.querySelector(".results-grid");
+    if (!grid) {
+        grid = document.createElement("div");
+        grid.className = "gallery results-grid";
+        gallery.appendChild(grid);
+    }
+
+    grid.prepend(card);
+
+    // Enable the CSV export button if it was disabled
+    const csvBtn = document.querySelector(".btn-export-disabled");
+    if (csvBtn) {
+        const link = document.createElement("a");
+        link.href = "/export-csv";
+        link.className = "btn-export";
+        link.innerHTML = "&#x2193; Експортувати результати (CSV)";
+        csvBtn.replaceWith(link);
+    }
+}
+
 async function runProcessing() {
     if (!currentFilename) return;
 
     const runBtn = document.getElementById("runBtn");
     const alpha = currentAlpha();
 
-    document.getElementById("processSpinner").style.display = "block";
+    const originalText = runBtn.textContent;
     runBtn.disabled = true;
+    runBtn.textContent = "Збереження…";
 
     try {
         const response = await fetch(
@@ -342,10 +506,15 @@ async function runProcessing() {
         document.getElementById("secondarySNR").textContent = data.secondary.snr;
 
         document.getElementById("processResults").style.display = "block";
+
+        _insertResultCard(currentFilename, data);
+
+        runBtn.textContent = "Збережено ✓";
+        setTimeout(() => { runBtn.textContent = originalText; }, 2000);
     } catch (err) {
         alert("Помилка обробки: " + err.message);
+        runBtn.textContent = originalText;
     } finally {
-        document.getElementById("processSpinner").style.display = "none";
         runBtn.disabled = false;
     }
 }
