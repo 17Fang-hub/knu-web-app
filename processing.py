@@ -4,10 +4,14 @@ import numpy as np
 import cv2
 from pathlib import Path
 
-from metrics import compute_all_metrics
+from metrics import compute_all_metrics, iou_score
+from noise import add_gaussian_noise
 
 DEFAULT_ALPHA = 0.5
 DEFAULT_N = 2
+
+NOISE_SIGMAS = (5, 10, 15, 20, 25)
+NOISE_SEED = 42
 
 
 # ── Grünwald–Letnikov fractional derivative ──────────────────────────────────
@@ -106,7 +110,7 @@ def fractional_edge_detection(
     Full GL-Canny edge detection.
     Returns (edge_map uint8 {0,255}, gradient_magnitude float32 normalised [0,1]).
     """
-    img = image.astype(np.float64)
+    img: np.ndarray = image.astype(np.float64)
     if img.max() > 1.0:
         img = img / 255.0
 
@@ -125,7 +129,7 @@ def fractional_edge_detection(
     else:
         g_x, g_y = _channel_gradients(img, kx, ky)
 
-    g = np.hypot(g_x, g_y)
+    g: np.ndarray = np.hypot(g_x, g_y)
     g_max = float(g.max())
     grad_mag = (g / g_max).astype(np.float32) if g_max > 0 else np.zeros(img.shape[:2], dtype=np.float32)
 
@@ -142,7 +146,8 @@ def fractional_edge_detection(
         low = low_frac * nms_max
         high = 3.0 * low
     else:
-        mag8 = np.clip(nms / nms_max * 255.0, 0, 255).astype(np.uint8)
+        nms_f: np.ndarray = nms
+        mag8 = np.clip(nms_f / nms_max * 255.0, 0, 255).astype(np.uint8)
         otsu, _ = cv2.threshold(mag8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         high = otsu / 255.0 * nms_max
         low = 0.5 * high
@@ -172,14 +177,18 @@ def apply_fractional(image_path: Path, alpha: float = DEFAULT_ALPHA, n: int = DE
     }
 
 
-def apply_sobel(image_path: Path) -> dict:
-    img = _read_image(image_path)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    t0 = time.perf_counter()
+def sobel_edge_detection(image: np.ndarray) -> tuple:
+    """
+    Classical Sobel edge detection on an in-memory image.
+    Returns (edge_map uint8 {0,255}, gradient_magnitude float32 normalised [0,1]).
+    """
+    if image.ndim == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    else:
+        gray = image.astype(np.float32)
     grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     grad_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
-    magnitude = cv2.magnitude(grad_x, grad_y)
-    elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
+    magnitude: np.ndarray = cv2.magnitude(grad_x, grad_y)
     mag_max = float(magnitude.max())
     if mag_max > 0:
         norm_u8 = (magnitude / mag_max * 255).astype(np.uint8)
@@ -188,6 +197,14 @@ def apply_sobel(image_path: Path) -> dict:
         norm_u8 = magnitude.astype(np.uint8)
         grad_mag = np.zeros_like(magnitude, dtype=np.float32)
     _, edges = cv2.threshold(norm_u8, 20, 255, cv2.THRESH_BINARY)
+    return edges, grad_mag
+
+
+def apply_sobel(image_path: Path) -> dict:
+    img = _read_image(image_path)
+    t0 = time.perf_counter()
+    edges, grad_mag = sobel_edge_detection(img)
+    elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
     return {
         'edges_bgr': cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR),
         'edge_map': edges,
@@ -268,4 +285,38 @@ def process_both(source_path: Path, output_dir: Path, alpha: float = DEFAULT_ALP
             "time_ms": sobel['elapsed_ms'],
             **sobel_m,
         },
+    }
+
+
+def noise_robustness(
+    image_path: Path,
+    alpha: float = DEFAULT_ALPHA,
+    n: int = DEFAULT_N,
+    seed: int = NOISE_SEED,
+) -> dict:
+    """
+    Noise-robustness battery: IoU between clean and noisy edge maps for
+    Gaussian noise at σ ∈ {5,10,15,20,25}. A method whose IoU decays
+    slower is more robust to noise.
+    """
+    img = _read_image(image_path)
+    rng = np.random.RandomState(seed)
+
+    gl_clean, _ = fractional_edge_detection(img, alpha=alpha, n=n)
+    sobel_clean, _ = sobel_edge_detection(img)
+
+    gl_canny_iou = []
+    sobel_iou = []
+    for sigma in NOISE_SIGMAS:
+        noisy = add_gaussian_noise(img, float(sigma), rng=rng)
+        gl_noisy, _ = fractional_edge_detection(noisy, alpha=alpha, n=n)
+        sobel_noisy, _ = sobel_edge_detection(noisy)
+        gl_canny_iou.append(iou_score(gl_clean, gl_noisy))
+        sobel_iou.append(iou_score(sobel_clean, sobel_noisy))
+
+    return {
+        "noise_levels": [float(s) for s in NOISE_SIGMAS],
+        "sobel_iou": sobel_iou,
+        "gl_canny_iou": gl_canny_iou,
+        "alpha": alpha,
     }

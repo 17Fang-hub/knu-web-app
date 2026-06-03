@@ -145,6 +145,7 @@ function openResultsModal(card) {
     document.getElementById("resSobelTime").textContent = d.sobelTime;
 
     _populateRmMetrics(d);
+    _renderResultsNoise(card);
 
     resetZoom();
     resultsModal.style.display = "flex";
@@ -317,6 +318,7 @@ function openProcessModal(filename) {
     alphaSlider.value = "0.5";
     alphaValue.textContent = "0.5";
     fracAlphaLabel.textContent = "0.5";
+    _updateSliderFill(alphaSlider);
 
     document.getElementById("processResults").style.display = "none";
     document.getElementById("classicalImg").src = "";
@@ -324,6 +326,7 @@ function openProcessModal(filename) {
     document.getElementById("classicalTime").textContent = "—";
     document.getElementById("secondaryTime").textContent = "—";
     _resetPmMetrics();
+    _resetNoiseTest();
     document.getElementById("processSpinner").style.display = "block";
 
     processModal.style.display = "flex";
@@ -355,12 +358,22 @@ function currentAlpha() {
     return parseFloat(alphaSlider.value).toFixed(1);
 }
 
+function _updateSliderFill(slider) {
+    const pct = (slider.value - slider.min) / (slider.max - slider.min) * 100;
+    slider.style.setProperty("--fill-pct", pct.toFixed(2) + "%");
+}
+
+_updateSliderFill(alphaSlider);
+
 alphaSlider.addEventListener("input", function () {
     const a = currentAlpha();
     alphaValue.textContent = a;
     fracAlphaLabel.textContent = a;
+    _updateSliderFill(this);
     clearTimeout(previewTimer);
     previewTimer = setTimeout(previewFractional, 180);
+    // The noise chart was computed for a previous α — invalidate it.
+    _resetNoiseTest();
 });
 
 function _applyFractional(frac) {
@@ -449,7 +462,7 @@ function _formatNow() {
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function _insertResultCard(filename, data) {
+function _insertResultCard(filename, data, noiseData) {
     const alpha    = parseFloat(data.classical.alpha).toFixed(1);
     const fracUrl  = data.classical.url;
     const sobelUrl = data.secondary.url;
@@ -469,6 +482,7 @@ function _insertResultCard(filename, data) {
     card.dataset.sobelUrl  = sobelUrl;
     card.dataset.sobelTime = sobelTime;
     card.dataset.date      = date;
+    card.dataset.noise     = noiseData ? JSON.stringify(noiseData) : "";
 
     // Store all new metrics in dataset
     METRICS_DEF.forEach(([key, , , , , dsFracKey, dsSobelKey]) => {
@@ -556,7 +570,23 @@ async function runProcessing() {
 
         document.getElementById("processResults").style.display = "block";
 
-        _insertResultCard(currentFilename, data);
+        // Persist the noise test together with the pair, but only if it was
+        // computed for the same α that is now being saved.
+        let noiseToSave = null;
+        if (lastNoise && Math.abs(lastNoise.alpha - parseFloat(alpha)) < 1e-9) {
+            noiseToSave = lastNoise.data;
+            try {
+                await fetch(`/result/${data.id}/noise`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(noiseToSave),
+                });
+            } catch (e) {
+                noiseToSave = null;  // persistence failed → no chart on the card
+            }
+        }
+
+        _insertResultCard(currentFilename, data, noiseToSave);
 
         runBtn.textContent = "Збережено ✓";
         setTimeout(() => { runBtn.textContent = originalText; }, 2000);
@@ -565,5 +595,146 @@ async function runProcessing() {
         runBtn.textContent = originalText;
     } finally {
         runBtn.disabled = false;
+    }
+}
+
+// ── Noise-robustness test (IoU vs σ) ────────────────────────────────────────────
+// Charts are keyed by canvas id: one for the processing modal (preview),
+// one for the saved-result modal.
+const noiseCharts = { noiseChart: null, resultsNoiseChart: null };
+
+// Last computed (preview) noise test, awaiting persistence with the saved pair.
+let lastNoise = null;
+
+function _resetNoiseTest() {
+    const wrap = document.getElementById("noiseChartWrap");
+    const spinner = document.getElementById("noiseSpinner");
+    if (wrap) wrap.style.display = "none";
+    if (spinner) spinner.style.display = "none";
+    if (noiseCharts.noiseChart) { noiseCharts.noiseChart.destroy(); noiseCharts.noiseChart = null; }
+    lastNoise = null;
+}
+
+function _cssVar(name, fallback) {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name);
+    return v ? v.trim() : fallback;
+}
+
+function _renderNoiseChart(canvasId, data) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || typeof Chart === "undefined") return;
+
+    const labels = data.noise_levels.map(v => "σ=" + v);
+
+    const tick = _cssVar("--text-soft", "#7d8696");
+    const grid = _cssVar("--border", "rgba(125,134,150,0.25)");
+
+    if (noiseCharts[canvasId]) noiseCharts[canvasId].destroy();
+    noiseCharts[canvasId] = new Chart(canvas.getContext("2d"), {
+        type: "line",
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: "GL-Canny",
+                    data: data.gl_canny_iou,
+                    borderColor: "#4f8cff",
+                    backgroundColor: "rgba(79,140,255,0.15)",
+                    borderWidth: 2,
+                    tension: 0.25,
+                    pointRadius: 4,
+                },
+                {
+                    label: "Sobel",
+                    data: data.sobel_iou,
+                    borderColor: "#ff7d4f",
+                    backgroundColor: "rgba(255,125,79,0.15)",
+                    borderWidth: 2,
+                    tension: 0.25,
+                    pointRadius: 4,
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            scales: {
+                y: {
+                    min: 0, max: 1,
+                    title: { display: true, text: "IoU з чистою картою", color: tick },
+                    ticks: { color: tick },
+                    grid: { color: grid },
+                },
+                x: {
+                    title: { display: true, text: "Рівень гаусового шуму σ", color: tick },
+                    ticks: { color: tick },
+                    grid: { color: grid },
+                },
+            },
+            plugins: {
+                legend: { position: "top", labels: { color: tick } },
+            },
+        },
+    });
+}
+
+async function runNoiseRobustness() {
+    if (!currentFilename) return;
+
+    const btn = document.getElementById("noiseTestBtn");
+    const spinner = document.getElementById("noiseSpinner");
+    const wrap = document.getElementById("noiseChartWrap");
+    const alpha = currentAlpha();
+
+    btn.disabled = true;
+    wrap.style.display = "none";
+    spinner.style.display = "block";
+
+    try {
+        const response = await fetch(
+            `/analyze/noise-robustness/${encodeURIComponent(currentFilename)}?alpha=${alpha}`,
+            { method: "POST" }
+        );
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `Помилка сервера (${response.status})`);
+        }
+
+        const data = await response.json();
+        // Cache for persistence with the saved pair (tagged with the α it used).
+        lastNoise = { alpha: parseFloat(alpha), data };
+        _renderNoiseChart("noiseChart", data);
+        wrap.style.display = "block";
+    } catch (err) {
+        alert("Помилка тесту робастності: " + err.message);
+    } finally {
+        spinner.style.display = "none";
+        btn.disabled = false;
+    }
+}
+
+// Render the saved-result modal chart from a card's data-noise attribute.
+function _renderResultsNoise(card) {
+    const wrap = document.getElementById("resultsNoiseWrap");
+    const empty = document.getElementById("resultsNoiseEmpty");
+    if (noiseCharts.resultsNoiseChart) {
+        noiseCharts.resultsNoiseChart.destroy();
+        noiseCharts.resultsNoiseChart = null;
+    }
+
+    let data = null;
+    const raw = card.dataset.noise;
+    if (raw && raw !== "") {
+        try { data = JSON.parse(raw); } catch (e) { data = null; }
+    }
+
+    if (data && Array.isArray(data.noise_levels) && data.noise_levels.length) {
+        wrap.style.display = "block";
+        empty.style.display = "none";
+        _renderNoiseChart("resultsNoiseChart", data);
+    } else {
+        wrap.style.display = "none";
+        empty.style.display = "block";
     }
 }

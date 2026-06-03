@@ -57,6 +57,18 @@ def contrast_ratio(edge_map: np.ndarray, original_image: np.ndarray) -> float:
     return round(float(local_contrast[binary].mean()) / 255.0, 6)
 
 
+def iou_score(edge_map_1: np.ndarray, edge_map_2: np.ndarray) -> float:
+    """
+    Intersection over Union between two binary edge maps.
+    Returns float in [0, 1]: 1 = identical, 0 = no overlap.
+    """
+    m1 = edge_map_1 > 0
+    m2 = edge_map_2 > 0
+    intersection = int(np.logical_and(m1, m2).sum())
+    union = int(np.logical_or(m1, m2).sum())
+    return round(intersection / union, 6) if union > 0 else 0.0
+
+
 def compute_all_metrics(
     edge_map: np.ndarray,
     gradient_magnitude: np.ndarray,

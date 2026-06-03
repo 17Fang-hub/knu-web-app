@@ -5,42 +5,50 @@ import shutil
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, UploadFile, File
+from fastapi import FastAPI, Request, UploadFile, File, Body
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 
 from database import engine, AsyncSessionLocal, Base
-from models import Image, ProcessingResult
-from processing import process_both, fractional_preview, sobel_preview, DEFAULT_ALPHA
+from models import Image, ProcessingResult, NoiseRobustnessTest
+from processing import (
+    process_both,
+    fractional_preview,
+    sobel_preview,
+    noise_robustness,
+    DEFAULT_ALPHA,
+)
 
 ALPHA_MIN, ALPHA_MAX = 0.1, 1.9
 
 _NEW_COLUMNS = [
-    ("fractional_edge_density",          "REAL"),
-    ("fractional_mean_edge_strength",     "REAL"),
-    ("fractional_num_components",         "INTEGER"),
-    ("fractional_mean_component_length",  "REAL"),
-    ("fractional_fragmentation",          "REAL"),
-    ("fractional_contrast_ratio",         "REAL"),
-    ("sobel_edge_density",               "REAL"),
-    ("sobel_mean_edge_strength",          "REAL"),
-    ("sobel_num_components",             "INTEGER"),
-    ("sobel_mean_component_length",       "REAL"),
-    ("sobel_fragmentation",              "REAL"),
-    ("sobel_contrast_ratio",             "REAL"),
+    ("processing_results",      "fractional_edge_density",          "REAL"),
+    ("processing_results",      "fractional_mean_edge_strength",     "REAL"),
+    ("processing_results",      "fractional_num_components",         "INTEGER"),
+    ("processing_results",      "fractional_mean_component_length",  "REAL"),
+    ("processing_results",      "fractional_fragmentation",          "REAL"),
+    ("processing_results",      "fractional_contrast_ratio",         "REAL"),
+    ("processing_results",      "sobel_edge_density",               "REAL"),
+    ("processing_results",      "sobel_mean_edge_strength",          "REAL"),
+    ("processing_results",      "sobel_num_components",             "INTEGER"),
+    ("processing_results",      "sobel_mean_component_length",       "REAL"),
+    ("processing_results",      "sobel_fragmentation",              "REAL"),
+    ("processing_results",      "sobel_contrast_ratio",             "REAL"),
 ]
 
 
 async def _run_migrations(conn) -> None:
-    """Idempotently add new metric columns to processing_results."""
-    for col_name, col_type in _NEW_COLUMNS:
+    """Idempotently add new columns to existing tables."""
+    for table_name, col_name, col_type in _NEW_COLUMNS:
         try:
             await conn.execute(
                 text(
-                    f"ALTER TABLE processing_results "
+                    f"ALTER TABLE {table_name} "
                     f"ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
                 )
             )
@@ -104,9 +112,23 @@ async def read_root(request: Request):
         images = result.scalars().all()
 
         res = await session.execute(
-            select(ProcessingResult).order_by(ProcessingResult.processed_at.desc())
+            select(ProcessingResult)
+            .options(selectinload(ProcessingResult.noise_tests))
+            .order_by(ProcessingResult.processed_at.desc())
         )
         results = res.scalars().all()
+
+        # Per-result noise-robustness chart data (None when no test was saved).
+        noise_by_result = {}
+        for r in results:
+            tests = r.noise_tests
+            if tests:
+                noise_by_result[r.id] = {
+                    "noise_levels": [t.noise_sigma for t in tests],
+                    "sobel_iou": [t.sobel_iou for t in tests],
+                    "gl_canny_iou": [t.gl_canny_iou for t in tests],
+                    "alpha": r.fractional_alpha,
+                }
 
     return templates.TemplateResponse(
         request=request,
@@ -114,6 +136,7 @@ async def read_root(request: Request):
         context={
             "images": images,
             "results": results,
+            "noise_by_result": noise_by_result,
             "has_results": len(results) > 0,
         }
     )
@@ -237,11 +260,59 @@ async def process_image(filename: str, alpha: float = DEFAULT_ALPHA):
     })
 
 
+@app.post("/analyze/noise-robustness/{filename}")
+async def analyze_noise_robustness(filename: str, alpha: float = DEFAULT_ALPHA):
+    """
+    Preview-only noise-robustness battery (no DB write). The result is persisted
+    only later, together with the processed pair, via POST /result/{id}/noise.
+    """
+    file_path = UPLOAD_DIR / filename
+    if not file_path.exists():
+        return JSONResponse(status_code=404, content={"error": "Файл не знайдено"})
+
+    result = await run_in_threadpool(noise_robustness, file_path, _clamp_alpha(alpha))
+    return JSONResponse(result)
+
+
+@app.post("/result/{result_id}/noise")
+async def save_noise_robustness(result_id: int, payload: dict = Body(...)):
+    """Persist a previously computed noise-robustness test against a saved pair."""
+    levels = payload.get("noise_levels") or []
+    sobel = payload.get("sobel_iou") or []
+    gl = payload.get("gl_canny_iou") or []
+    if not (len(levels) == len(sobel) == len(gl)) or not levels:
+        return JSONResponse(status_code=400, content={"error": "Некоректні дані тесту"})
+
+    async with AsyncSessionLocal() as session:
+        res = await session.execute(
+            select(ProcessingResult)
+            .options(selectinload(ProcessingResult.noise_tests))
+            .where(ProcessingResult.id == result_id)
+        )
+        record = res.scalar_one_or_none()
+        if not record:
+            return JSONResponse(status_code=404, content={"error": "Запис не знайдено"})
+
+        # Replace any previously stored test for this pair.
+        record.noise_tests.clear()
+        for level, s_iou, g_iou in zip(levels, sobel, gl):
+            record.noise_tests.append(NoiseRobustnessTest(
+                noise_sigma=float(level),
+                sobel_iou=float(s_iou),
+                gl_canny_iou=float(g_iou),
+            ))
+        await session.commit()
+
+    return JSONResponse({"ok": True})
+
+
 @app.delete("/result/{result_id}")
 async def delete_result(result_id: int):
     async with AsyncSessionLocal() as session:
         res = await session.execute(
-            select(ProcessingResult).where(ProcessingResult.id == result_id)
+            select(ProcessingResult)
+            .options(selectinload(ProcessingResult.noise_tests))
+            .where(ProcessingResult.id == result_id)
         )
         record = res.scalar_one_or_none()
         if not record:
@@ -252,6 +323,7 @@ async def delete_result(result_id: int):
             if p.exists():
                 os.remove(p)
 
+        # Cascade removes the associated noise-robustness rows.
         await session.delete(record)
         await session.commit()
 

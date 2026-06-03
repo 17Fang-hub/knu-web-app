@@ -4,8 +4,9 @@ import cv2
 import numpy as np
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy import select, func
 from database import Base
-from models import Image
+from models import Image, ProcessingResult, NoiseRobustnessTest
 import main
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -220,6 +221,94 @@ async def test_preview_alpha_clamped(client, tmp_path):
 async def test_preview_nonexistent_image(client, tmp_path):
     main.UPLOAD_DIR = tmp_path
     response = await client.post("/preview/ghost.jpg?alpha=0.5")
+    assert response.status_code == 404
+
+
+# ── noise robustness (Етап 2) ────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_noise_robustness(client, tmp_path):
+    main.UPLOAD_DIR = tmp_path
+
+    await client.post(
+        "/upload",
+        files={"file": ("noise_test.jpg", _make_jpeg(), "image/jpeg")}
+    )
+
+    response = await client.post("/analyze/noise-robustness/noise_test.jpg?alpha=0.5")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["noise_levels"] == [5.0, 10.0, 15.0, 20.0, 25.0]
+    assert len(data["sobel_iou"]) == 5
+    assert len(data["gl_canny_iou"]) == 5
+    assert data["alpha"] == 0.5
+    # IoU values must lie in [0, 1]
+    for v in data["sobel_iou"] + data["gl_canny_iou"]:
+        assert 0.0 <= v <= 1.0
+
+
+@pytest.mark.asyncio
+async def test_noise_robustness_nonexistent_image(client, tmp_path):
+    main.UPLOAD_DIR = tmp_path
+    response = await client.post("/analyze/noise-robustness/ghost.jpg")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_noise_preview_does_not_persist(client, tmp_path, test_db):
+    """The analyze endpoint is preview-only — nothing is written to the DB."""
+    main.UPLOAD_DIR = tmp_path
+    await client.post(
+        "/upload",
+        files={"file": ("np.jpg", _make_jpeg(), "image/jpeg")}
+    )
+    await client.post("/analyze/noise-robustness/np.jpg?alpha=0.5")
+
+    async with test_db() as session:
+        count = await session.scalar(select(func.count()).select_from(NoiseRobustnessTest))
+    assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_noise_saved_with_pair_and_cascade_delete(client, tmp_path, test_db):
+    """Noise rows are persisted against a saved pair and removed with it."""
+    main.UPLOAD_DIR = tmp_path
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    main.PROCESSED_DIR = processed
+
+    await client.post(
+        "/upload",
+        files={"file": ("pair.jpg", _make_jpeg(), "image/jpeg")}
+    )
+
+    # Save the processed pair.
+    proc = await client.post("/process/pair.jpg?alpha=0.5")
+    result_id = proc.json()["id"]
+
+    # Compute the noise test (preview) and persist it against the pair.
+    noise = (await client.post("/analyze/noise-robustness/pair.jpg?alpha=0.5")).json()
+    save = await client.post(f"/result/{result_id}/noise", json=noise)
+    assert save.status_code == 200
+
+    async with test_db() as session:
+        count = await session.scalar(select(func.count()).select_from(NoiseRobustnessTest))
+    assert count == 5
+
+    # Deleting the pair cascades to the noise rows.
+    await client.delete(f"/result/{result_id}")
+
+    async with test_db() as session:
+        remaining = await session.scalar(select(func.count()).select_from(NoiseRobustnessTest))
+        results = await session.scalar(select(func.count()).select_from(ProcessingResult))
+    assert remaining == 0
+    assert results == 0
+
+
+@pytest.mark.asyncio
+async def test_save_noise_nonexistent_result(client):
+    payload = {"noise_levels": [5.0], "sobel_iou": [0.5], "gl_canny_iou": [0.6]}
+    response = await client.post("/result/9999/noise", json=payload)
     assert response.status_code == 404
 
 

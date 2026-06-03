@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
 
@@ -39,3 +40,29 @@ class ProcessingResult(Base):
     sobel_contrast_ratio = Column(Float, nullable=True)
 
     processed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Noise-robustness rows are persisted together with the processed pair and
+    # removed together with it (cascade on delete).
+    noise_tests = relationship(
+        "NoiseRobustnessTest",
+        back_populates="result",
+        cascade="all, delete-orphan",
+        order_by="NoiseRobustnessTest.noise_sigma",
+    )
+
+
+class NoiseRobustnessTest(Base):
+    __tablename__ = "noise_robustness_tests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    result_id = Column(
+        Integer,
+        ForeignKey("processing_results.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    noise_sigma = Column(Float, nullable=False)
+    sobel_iou = Column(Float, nullable=True)
+    gl_canny_iou = Column(Float, nullable=True)
+
+    result = relationship("ProcessingResult", back_populates="noise_tests")

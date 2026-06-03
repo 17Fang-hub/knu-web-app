@@ -144,6 +144,7 @@
                         data-sobel-frag="{{ '%.6f'|format(r.sobel_fragmentation) if r.sobel_fragmentation is not none else '' }}"
                         data-sobel-contrast="{{ '%.6f'|format(r.sobel_contrast_ratio) if r.sobel_contrast_ratio is not none else '' }}"
                         data-date="{{ r.processed_at.strftime('%Y-%m-%d %H:%M') if r.processed_at else '' }}"
+                        data-noise='{{ noise_by_result[r.id]|tojson if r.id in noise_by_result else "" }}'
                         onclick="openResultsModal(this)">
                         <div class="result-thumbs">
                             <img src="/static/uploads/{{ r.source_filename }}" alt="Оригінал"
@@ -237,6 +238,22 @@
                             </tbody>
                         </table>
                     </div>
+
+                    <div class="noise-test-section">
+                        <button id="noiseTestBtn" type="button" onclick="runNoiseRobustness()">
+                            Тест робастності до шуму
+                        </button>
+                        <div id="noiseSpinner" class="spinner-container" style="display:none">
+                            <div class="spinner"></div>
+                            <p>Аналіз робастності (це може зайняти кілька секунд)…</p>
+                        </div>
+                        <div id="noiseChartWrap" style="display:none">
+                            <h3 class="noise-chart-title" id="noiseChartTitle">Стійкість до гаусового шуму</h3>
+                            <div class="noise-chart-box">
+                                <canvas id="noiseChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -305,6 +322,18 @@
                             <tr><td>Контрастність країв</td><td id="rmFracContrast">—</td><td id="rmSobelContrast">—</td></tr>
                         </tbody>
                     </table>
+                </div>
+
+                <div class="noise-test-section">
+                    <h3 class="noise-chart-title">Стійкість до гаусового шуму</h3>
+                    <div id="resultsNoiseWrap" style="display:none">
+                        <div class="noise-chart-box">
+                            <canvas id="resultsNoiseChart"></canvas>
+                        </div>
+                    </div>
+                    <p id="resultsNoiseEmpty" class="empty-msg noise-empty-msg" style="display:none">
+                        Тест робастності до шуму для цієї пари не проводився.
+                    </p>
                 </div>
             </div>
         </div>
@@ -384,11 +413,21 @@
                             <strong>Час обробки (мс)</strong> — тривалість виконання алгоритму виявлення
                             контурів (без читання та запису файлів), виміряна високоточним таймером.
                         </li>
+                        <li>
+                            <strong>IoU (Intersection over Union)</strong> — міра збігу двох бінарних
+                            карт країв: відношення кількості пікселів у перетині до кількості пікселів
+                            в об'єднанні (значення в [0, 1]; 1 — ідентичні карти, 0 — жодного спільного
+                            пікселя). Використовується у тесті робастності до шуму: карта країв чистого
+                            зображення порівнюється з картою зображення із доданим гаусовим шумом різних
+                            рівнів (σ = 5…25). Чим повільніше падає IoU зі зростанням σ, тим стійкіший
+                            метод до шуму.
+                        </li>
                     </ul>
                 </section>
             </div>
         </div>
 
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
         <script src="/static/js/script.js"></script>
     </body>
 </html>
