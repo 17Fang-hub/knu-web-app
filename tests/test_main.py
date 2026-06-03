@@ -158,3 +158,80 @@ async def test_export_csv_with_data(client, tmp_path):
     assert response.status_code == 200
     content = response.text
     assert "csv_test.jpg" in content
+
+
+# ── preview (повзунок α) ─────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_preview_with_sobel(client, tmp_path):
+    main.UPLOAD_DIR = tmp_path
+
+    await client.post(
+        "/upload",
+        files={"file": ("prev.jpg", _make_jpeg(), "image/jpeg")}
+    )
+
+    response = await client.post("/preview/prev.jpg?alpha=0.5&with_sobel=true")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["fractional"]["data_url"].startswith("data:image/jpeg;base64,")
+    assert data["fractional"]["alpha"] == 0.5
+    assert data["sobel"] is not None
+    assert data["sobel"]["data_url"].startswith("data:image/jpeg;base64,")
+
+
+@pytest.mark.asyncio
+async def test_preview_fractional_only(client, tmp_path):
+    main.UPLOAD_DIR = tmp_path
+
+    await client.post(
+        "/upload",
+        files={"file": ("prev2.jpg", _make_jpeg(), "image/jpeg")}
+    )
+
+    response = await client.post("/preview/prev2.jpg?alpha=1.2")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["fractional"]["alpha"] == 1.2
+    assert data["sobel"] is None
+
+
+@pytest.mark.asyncio
+async def test_preview_alpha_clamped(client, tmp_path):
+    main.UPLOAD_DIR = tmp_path
+
+    await client.post(
+        "/upload",
+        files={"file": ("prev3.jpg", _make_jpeg(), "image/jpeg")}
+    )
+
+    high = await client.post("/preview/prev3.jpg?alpha=5.0")
+    low = await client.post("/preview/prev3.jpg?alpha=0.0")
+    assert high.json()["fractional"]["alpha"] == 1.9
+    assert low.json()["fractional"]["alpha"] == 0.1
+
+
+@pytest.mark.asyncio
+async def test_preview_nonexistent_image(client, tmp_path):
+    main.UPLOAD_DIR = tmp_path
+    response = await client.post("/preview/ghost.jpg?alpha=0.5")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_process_saves_alpha_in_csv(client, tmp_path):
+    main.UPLOAD_DIR = tmp_path
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    main.PROCESSED_DIR = processed
+
+    await client.post(
+        "/upload",
+        files={"file": ("alpha_test.jpg", _make_jpeg(), "image/jpeg")}
+    )
+    await client.post("/process/alpha_test.jpg?alpha=0.8")
+
+    response = await client.get("/export-csv")
+    content = response.text
+    assert "α (дробова)" in content
+    assert "0.8" in content

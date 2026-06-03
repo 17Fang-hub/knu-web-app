@@ -45,7 +45,7 @@
         <header class="site-header">
             <div class="brand">
                 <span class="brand-icon">◷</span>
-                <h1>Детекція контурів похідними</h1>
+                <h1>Детекція контурів</h1>
             </div>
             <button class="theme-toggle" id="themeToggle" type="button">☾</button>
         </header>
@@ -66,7 +66,13 @@
             <button class="btn-upload" onclick="uploadImage()">Завантажити зображення</button>
         </div>
         <div class="gallery-header">
-            <h3>Галерея завантажених зображень</h3>
+            <h3 id="galleryTitle">Галерея завантажених зображень</h3>
+            <div class="gallery-switch" role="tablist">
+                <button type="button" class="gswitch-btn active" data-target="uploads"
+                    onclick="switchGallery('uploads')">Завантажені</button>
+                <button type="button" class="gswitch-btn" data-target="results"
+                    onclick="switchGallery('results')">Оброблені</button>
+            </div>
             {% if has_results %}
             <a href="/export-csv" class="btn-export">&#x2193; Експортувати результати (CSV)</a>
             {% else %}
@@ -74,28 +80,63 @@
             {% endif %}
         </div>
 
-        {% if images %}
-        <div class="gallery">
-            {% for image in images %}
-                <div class="gallery-item">
-                    <img src="/static/uploads/{{ image.filename }}" alt="{{ image.filename }}">
-                    <div class="image-info">{{ image.filename }}</div>
-                    <button
-                        class="compare-btn"
-                        onclick="openProcessModal('{{ image.filename }}')">
-                        Порівняти методи
-                    </button>
-                    <button
-                        class="delete-btn"
-                        onclick="confirmDelete('{{ image.filename }}')">
-                        Видалити
-                    </button>
-                </div>
-            {% endfor %}
+        <!-- Gallery 1: uploaded images -->
+        <div id="uploadsGallery">
+            {% if images %}
+            <div class="gallery">
+                {% for image in images %}
+                    <div class="gallery-item">
+                        <img src="/static/uploads/{{ image.filename }}" alt="{{ image.filename }}">
+                        <div class="image-info">{{ image.filename }}</div>
+                        <button
+                            class="compare-btn"
+                            onclick="openProcessModal('{{ image.filename }}')">
+                            Порівняти методи
+                        </button>
+                        <button
+                            class="delete-btn"
+                            onclick="confirmDelete('{{ image.filename }}')">
+                            Видалити
+                        </button>
+                    </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="empty-msg">Поки що немає завантажених зображень.</p>
+            {% endif %}
         </div>
-        {% else %}
-        <p class="empty-msg">Поки що немає завантажених зображень.</p>
-        {% endif %}
+
+        <!-- Gallery 2: saved processing results -->
+        <div id="resultsGallery" style="display:none">
+            {% if results %}
+            <div class="gallery results-grid">
+                {% for r in results %}
+                    <div class="result-card"
+                        data-source="{{ r.source_filename }}"
+                        data-alpha="{{ '%.1f'|format(r.fractional_alpha) if r.fractional_alpha is not none else '—' }}"
+                        data-frac-url="/static/processed/{{ r.fractional_filename }}"
+                        data-frac-time="{{ '%.1f'|format(r.fractional_time_ms) }}"
+                        data-frac-snr="{{ '%.2f'|format(r.fractional_snr) if r.fractional_snr is not none else '—' }}"
+                        data-sobel-url="/static/processed/{{ r.sobel_filename }}"
+                        data-sobel-time="{{ '%.1f'|format(r.sobel_time_ms) }}"
+                        data-sobel-snr="{{ '%.2f'|format(r.sobel_snr) if r.sobel_snr is not none else '—' }}"
+                        data-date="{{ r.processed_at.strftime('%Y-%m-%d %H:%M') if r.processed_at else '' }}"
+                        onclick="openResultsModal(this)">
+                        <div class="result-thumbs">
+                            <img src="/static/processed/{{ r.fractional_filename }}" alt="Дробовий">
+                            <img src="/static/processed/{{ r.sobel_filename }}" alt="Sobel">
+                        </div>
+                        <div class="result-info">
+                            <span class="result-name">{{ r.source_filename }}</span>
+                            <span class="result-badge">α = {{ '%.1f'|format(r.fractional_alpha) if r.fractional_alpha is not none else '—' }}</span>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="empty-msg">Поки що немає збережених результатів обробки.</p>
+            {% endif %}
+        </div>
 
         <!-- Image view modal -->
         <div id="imageModal" class="modal">
@@ -110,7 +151,21 @@
                 <span class="close-btn process-close-btn" id="processCloseBtn">&times;</span>
                 <h2>Порівняння методів: <em id="processFilename"></em></h2>
 
-                <button id="runBtn" onclick="runProcessing()">Обробити</button>
+                <div class="alpha-control">
+                    <div class="alpha-control-head">
+                        <label for="alphaSlider">Порядок дробової похідної</label>
+                        <span class="alpha-value">α = <strong id="alphaValue">0.5</strong></span>
+                    </div>
+                    <input type="range" id="alphaSlider" min="0.1" max="1.9" step="0.1" value="0.5">
+                    <div class="alpha-scale">
+                        <span>0.1</span>
+                        <span>1.0 (≈ Sobel)</span>
+                        <span>1.9</span>
+                    </div>
+                    <p class="alpha-hint">Рухайте повзунок — ліва панель оновлюється в реальному часі</p>
+                </div>
+
+                <button id="runBtn" onclick="runProcessing()">Зберегти результат</button>
 
                 <div id="processSpinner" class="spinner-container" style="display:none">
                     <div class="spinner"></div>
@@ -120,8 +175,8 @@
                 <div id="processResults" style="display:none">
                     <div class="comparison">
                         <div class="comparison-panel">
-                            <h3>Класичний метод (Canny)</h3>
-                            <img id="classicalImg" src="" alt="Canny result">
+                            <h3>Метод дробових похідних (α=<span id="fracAlphaLabel">0.5</span>)</h3>
+                            <img id="classicalImg" src="" alt="Fractional derivative result">
                             <div class="metrics">
                                 <span>Час: <strong id="classicalTime"></strong> мс</span>
                                 <span>SNR: <strong id="classicalSNR"></strong></span>
@@ -137,6 +192,42 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Saved result comparison modal -->
+        <div id="resultsModal" class="modal process-modal">
+            <div class="process-modal-content">
+                <span class="close-btn process-close-btn" id="resultsCloseBtn">&times;</span>
+                <h2>Результат обробки: <em id="resultsFilename"></em></h2>
+                <p class="results-meta">
+                    <span class="results-chip">α = <strong id="resultsAlpha">—</strong></span>
+                    <span class="results-chip results-date" id="resultsDate"></span>
+                </p>
+
+                <div class="comparison" id="resultsComparison">
+                    <div class="comparison-panel">
+                        <h3>Метод дробових похідних</h3>
+                        <div class="zoom-frame">
+                            <img id="resFracImg" class="zoom-img" src="" alt="Fractional derivative result">
+                        </div>
+                        <div class="metrics">
+                            <span>Час: <strong id="resFracTime"></strong> мс</span>
+                            <span>SNR: <strong id="resFracSNR"></strong></span>
+                        </div>
+                    </div>
+                    <div class="comparison-panel">
+                        <h3>Метод Sobel</h3>
+                        <div class="zoom-frame">
+                            <img id="resSobelImg" class="zoom-img" src="" alt="Sobel result">
+                        </div>
+                        <div class="metrics">
+                            <span>Час: <strong id="resSobelTime"></strong> мс</span>
+                            <span>SNR: <strong id="resSobelSNR"></strong></span>
+                        </div>
+                    </div>
+                </div>
+                <p class="zoom-hint">🔍 Наведіть курсор на будь-яке зображення — обидва синхронно збільшаться у тій самій точці</p>
             </div>
         </div>
 

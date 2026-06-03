@@ -568,3 +568,242 @@ button:disabled {
     color: var(--accent);
     font-size: 15px;
 }
+
+/* ── Alpha slider control ────────────────────────────────────────────────── */
+.alpha-control {
+    margin: 18px 0 20px;
+    padding: 16px 18px;
+    background: var(--surface-alt);
+    border: 1px solid var(--border-alt);
+    border-radius: 14px;
+    transition: background-color 0.25s, border-color 0.25s;
+}
+
+.alpha-control-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.alpha-control-head label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-mid);
+}
+
+.alpha-value {
+    font-size: 14px;
+    color: var(--text-soft);
+}
+
+.alpha-value strong {
+    color: var(--accent);
+    font-size: 16px;
+}
+
+.alpha-control input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    margin: 14px 0 6px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    cursor: pointer;
+    outline: none;
+}
+
+.alpha-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 3px solid var(--accent);
+    box-shadow: var(--shadow);
+    cursor: pointer;
+    transition: transform 0.15s;
+}
+
+.alpha-control input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+}
+
+.alpha-control input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 3px solid var(--accent);
+    box-shadow: var(--shadow);
+    cursor: pointer;
+}
+
+.alpha-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.alpha-hint {
+    margin: 10px 0 0;
+    font-size: 12.5px;
+    color: var(--text-muted);
+}
+
+.comparison-panel img {
+    transition: opacity 0.2s;
+}
+
+/* ── Gallery switch (segmented toggle) ───────────────────────────────────────── */
+.gallery-switch {
+    display: inline-flex;
+    padding: 4px;
+    gap: 4px;
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+}
+
+.gswitch-btn {
+    padding: 7px 16px;
+    border: none;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--text-soft);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;
+}
+
+.gswitch-btn:hover {
+    color: var(--text);
+}
+
+.gswitch-btn.active {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(91, 107, 255, 0.32);
+}
+
+/* ── Results gallery cards (paired thumbnails) ───────────────────────────────── */
+.results-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+.result-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s, border-color 0.25s;
+}
+
+.result-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-hover);
+    border-color: var(--accent);
+}
+
+.result-thumbs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    background: var(--border);
+}
+
+.result-thumbs img {
+    width: 100%;
+    height: 130px;
+    object-fit: cover;
+    display: block;
+    background: #000;
+}
+
+.result-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 11px 13px;
+    background: var(--surface-alt);
+    border-top: 1px solid var(--border);
+    transition: background-color 0.25s;
+}
+
+.result-name {
+    font-size: 12.5px;
+    color: var(--text-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.result-badge {
+    flex-shrink: 0;
+    padding: 3px 10px;
+    border-radius: 20px;
+    background: rgba(91, 107, 255, 0.14);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* ── Results modal: meta line ────────────────────────────────────────────────── */
+.results-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 4px 0 0;
+}
+
+.results-chip {
+    padding: 4px 12px;
+    border-radius: 20px;
+    background: var(--surface-alt);
+    border: 1px solid var(--border-alt);
+    font-size: 13px;
+    color: var(--text-soft);
+}
+
+.results-chip strong {
+    color: var(--accent);
+}
+
+.results-date {
+    color: var(--text-muted);
+}
+
+/* ── Synchronized magnifier frame ────────────────────────────────────────────── */
+.zoom-frame {
+    position: relative;
+    overflow: hidden;
+    border-radius: 8px;
+    background: #000;
+    cursor: zoom-in;
+}
+
+.zoom-frame .zoom-img {
+    width: 100%;
+    max-height: 380px;
+    object-fit: contain;
+    display: block;
+    border-radius: 0;
+    transform-origin: center center;
+    transition: transform 0.12s ease-out;
+    will-change: transform;
+}
+
+.zoom-hint {
+    margin: 18px 0 0;
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--text-muted);
+}

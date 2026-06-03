@@ -14,7 +14,14 @@ from sqlalchemy.exc import IntegrityError
 
 from database import engine, AsyncSessionLocal, Base
 from models import Image, ProcessingResult
-from processing import process_both
+from processing import process_both, fractional_preview, sobel_preview, DEFAULT_ALPHA
+
+ALPHA_MIN, ALPHA_MAX = 0.1, 1.9
+
+
+def _clamp_alpha(alpha: float) -> float:
+    return max(ALPHA_MIN, min(ALPHA_MAX, alpha))
+
 
 UPLOAD_DIR = Path("static/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -66,15 +73,19 @@ async def read_root(request: Request):
         )
         images = result.scalars().all()
 
-        count = await session.execute(
-            select(func.count()).select_from(ProcessingResult)
+        res = await session.execute(
+            select(ProcessingResult).order_by(ProcessingResult.processed_at.desc())
         )
-        has_results = (count.scalar() or 0) > 0
+        results = res.scalars().all()
 
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"images": images, "has_results": has_results}
+        context={
+            "images": images,
+            "results": results,
+            "has_results": len(results) > 0,
+        }
     )
 
 
@@ -119,23 +130,41 @@ async def delete_image(filename: str):
     return RedirectResponse(url="/", status_code=303)
 
 
-@app.post("/process/{filename}")
-async def process_image(filename: str):
+@app.post("/preview/{filename}")
+async def preview_image(filename: str, alpha: float = DEFAULT_ALPHA, with_sobel: bool = False):
+    """
+    Швидке превʼю (без запису в БД/на диск). Дробовий метод рахується завжди
+    (для повзунка α); Sobel — лише за with_sobel=true (при відкритті вікна).
+    """
     file_path = UPLOAD_DIR / filename
     if not file_path.exists():
         return JSONResponse(status_code=404, content={"error": "Файл не знайдено"})
 
-    result = process_both(file_path, PROCESSED_DIR)
+    payload = {
+        "fractional": fractional_preview(file_path, alpha=_clamp_alpha(alpha)),
+        "sobel": sobel_preview(file_path) if with_sobel else None,
+    }
+    return JSONResponse(payload)
+
+
+@app.post("/process/{filename}")
+async def process_image(filename: str, alpha: float = DEFAULT_ALPHA):
+    file_path = UPLOAD_DIR / filename
+    if not file_path.exists():
+        return JSONResponse(status_code=404, content={"error": "Файл не знайдено"})
+
+    result = process_both(file_path, PROCESSED_DIR, alpha=_clamp_alpha(alpha))
 
     async with AsyncSessionLocal() as session:
         record = ProcessingResult(
             source_filename=filename,
-            classical_filename=result["classical"]["filename"],
-            classical_time_ms=result["classical"]["time_ms"],
-            classical_snr=result["classical"]["snr"],
-            secondary_filename=result["secondary"]["filename"],
-            secondary_time_ms=result["secondary"]["time_ms"],
-            secondary_snr=result["secondary"]["snr"],
+            fractional_filename=result["classical"]["filename"],
+            fractional_time_ms=result["classical"]["time_ms"],
+            fractional_snr=result["classical"]["snr"],
+            fractional_alpha=result["classical"]["alpha"],
+            sobel_filename=result["secondary"]["filename"],
+            sobel_time_ms=result["secondary"]["time_ms"],
+            sobel_snr=result["secondary"]["snr"],
         )
         session.add(record)
         await session.commit()
@@ -145,6 +174,7 @@ async def process_image(filename: str):
             "url": f"/static/processed/{result['classical']['filename']}",
             "time_ms": result["classical"]["time_ms"],
             "snr": result["classical"]["snr"],
+            "alpha": result["classical"]["alpha"],
         },
         "secondary": {
             "url": f"/static/processed/{result['secondary']['filename']}",
@@ -167,17 +197,19 @@ async def export_csv():
     writer = csv.writer(output)
     writer.writerow([
         "Назва фото",
-        "Час Canny (мс)", "SNR Canny",
+        "α (дробова)",
+        "Час Дробовий (мс)", "SNR Дробовий",
         "Час Sobel (мс)", "SNR Sobel",
         "Дата обробки",
     ])
     for r in records:
         writer.writerow([
             r.source_filename,
-            r.classical_time_ms,
-            r.classical_snr,
-            r.secondary_time_ms,
-            r.secondary_snr,
+            r.fractional_alpha if r.fractional_alpha is not None else "",
+            r.fractional_time_ms,
+            r.fractional_snr,
+            r.sobel_time_ms,
+            r.sobel_snr,
             r.processed_at.strftime("%Y-%m-%d %H:%M:%S") if r.processed_at is not None else "",
         ])
 
