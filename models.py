@@ -12,57 +12,54 @@ class Image(Base):
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-class ProcessingResult(Base):
-    __tablename__ = "processing_results"
+class ProcessingRun(Base):
+    """
+    Один запуск обробки зображення для конкретного рівня шуму σ.
+    Sobel не залежить від α, тому його метрики зберігаються один раз тут;
+    результати GL-Canny для кожного α — у дочірніх рядках DetectionResult.
+    """
+    __tablename__ = "processing_runs"
 
     id = Column(Integer, primary_key=True, index=True)
     source_filename = Column(String, nullable=False)
+    sigma = Column(Float, nullable=False)
 
-    # GL-Canny (fractional) results
-    fractional_filename = Column(String, nullable=False)
-    fractional_time_ms = Column(Float, nullable=False)
-    fractional_alpha = Column(Float, nullable=True)
-    fractional_edge_density = Column(Float, nullable=True)
-    fractional_mean_edge_strength = Column(Float, nullable=True)
-    fractional_num_components = Column(Integer, nullable=True)
-    fractional_mean_component_length = Column(Float, nullable=True)
-    fractional_fragmentation = Column(Float, nullable=True)
-    fractional_contrast_ratio = Column(Float, nullable=True)
-
-    # Sobel results
+    # Метрики Sobel (один раз на запуск)
     sobel_filename = Column(String, nullable=False)
-    sobel_time_ms = Column(Float, nullable=False)
     sobel_edge_density = Column(Float, nullable=True)
-    sobel_mean_edge_strength = Column(Float, nullable=True)
-    sobel_num_components = Column(Integer, nullable=True)
-    sobel_mean_component_length = Column(Float, nullable=True)
-    sobel_fragmentation = Column(Float, nullable=True)
-    sobel_contrast_ratio = Column(Float, nullable=True)
+    sobel_time_ms = Column(Float, nullable=False)
 
     processed_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Noise-robustness rows are persisted together with the processed pair and
-    # removed together with it (cascade on delete).
-    noise_tests = relationship(
-        "NoiseRobustnessTest",
-        back_populates="result",
+    detections = relationship(
+        "DetectionResult",
+        back_populates="run",
         cascade="all, delete-orphan",
-        order_by="NoiseRobustnessTest.noise_sigma",
+        order_by="DetectionResult.alpha",
     )
 
 
-class NoiseRobustnessTest(Base):
-    __tablename__ = "noise_robustness_tests"
+class DetectionResult(Base):
+    """Результат GL-Canny для одного значення α у межах запуску (σ фіксований)."""
+    __tablename__ = "detection_results"
 
     id = Column(Integer, primary_key=True, index=True)
-    result_id = Column(
+    run_id = Column(
         Integer,
-        ForeignKey("processing_results.id", ondelete="CASCADE"),
+        ForeignKey("processing_runs.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    noise_sigma = Column(Float, nullable=False)
-    sobel_iou = Column(Float, nullable=True)
-    gl_canny_iou = Column(Float, nullable=True)
+    alpha = Column(Float, nullable=False)
 
-    result = relationship("ProcessingResult", back_populates="noise_tests")
+    # Метрики GL-Canny (залежать від α)
+    gl_filename = Column(String, nullable=False)
+    gl_edge_density = Column(Float, nullable=True)
+    gl_time_ms = Column(Float, nullable=True)
+
+    # Метрики порівняння GL-Canny (I1) vs Sobel (I2)
+    der = Column(Float, nullable=True)
+    dcr = Column(Float, nullable=True)
+    dcs = Column(Float, nullable=True)
+
+    run = relationship("ProcessingRun", back_populates="detections")

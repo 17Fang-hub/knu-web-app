@@ -67,174 +67,53 @@ function switchGallery(target) {
     });
 }
 
-// ── Metrics helpers ────────────────────────────────────────────────────────────
-
-// [apiKey, pm-frac-id, pm-sobel-id, rm-frac-id, rm-sobel-id, dataset-frac-key, dataset-sobel-key, formatter]
-const METRICS_DEF = [
-    ["edge_density",          "pmFracDensity",  "pmSobelDensity",  "rmFracDensity",  "rmSobelDensity",  "fracEdgeDensity",    "sobelEdgeDensity",    v => v.toFixed(4)],
-    ["mean_edge_strength",    "pmFracStrength", "pmSobelStrength", "rmFracStrength", "rmSobelStrength", "fracMeanStrength",   "sobelMeanStrength",   v => v.toFixed(4)],
-    ["num_components",        "pmFracNumComp",  "pmSobelNumComp",  "rmFracNumComp",  "rmSobelNumComp",  "fracNumComp",        "sobelNumComp",        v => String(Math.round(v))],
-    ["mean_component_length", "pmFracMeanLen",  "pmSobelMeanLen",  "rmFracMeanLen",  "rmSobelMeanLen",  "fracMeanLen",        "sobelMeanLen",        v => v.toFixed(1)],
-    ["fragmentation",         "pmFracFrag",     "pmSobelFrag",     "rmFracFrag",     "rmSobelFrag",     "fracFrag",           "sobelFrag",           v => v.toFixed(6)],
-    ["contrast_ratio",        "pmFracContrast", "pmSobelContrast", "rmFracContrast", "rmSobelContrast", "fracContrast",       "sobelContrast",       v => v.toFixed(4)],
-];
-
-function _fmtMetric(val, fmt) {
-    if (val === null || val === undefined || val === "" || val === "—") return "—";
+// ── Metric formatting helpers ────────────────────────────────────────────────
+function _fmtNum(val, digits) {
+    if (val === null || val === undefined || val === "") return "—";
     const n = parseFloat(val);
-    return isNaN(n) ? "—" : fmt(n);
+    return isNaN(n) ? "—" : n.toFixed(digits);
 }
 
-/** Update the GL-Canny column of the processing-modal metrics table. */
-function _updatePmFrac(m) {
-    METRICS_DEF.forEach(([key, fracId, , , , , , fmt]) => {
-        const el = document.getElementById(fracId);
-        if (el) el.textContent = _fmtMetric(m[key], fmt);
+function _alphaStr(a) {
+    return parseFloat(a).toFixed(1);
+}
+
+/**
+ * Render the per-α metrics table into a <tbody>. `alphas` is a list of
+ * {alpha, gl_edge_density, der, dcr, dcs, gl_time_ms}. The row matching
+ * `selectedAlpha` gets the .alpha-row-active class.
+ */
+function _renderAlphaTable(tbodyId, alphas, selectedAlpha) {
+    const tbody = document.getElementById(tbodyId);
+    tbody.innerHTML = "";
+    alphas.forEach(a => {
+        const tr = document.createElement("tr");
+        const active = Math.abs(a.alpha - selectedAlpha) < 1e-9;
+        if (active) tr.className = "alpha-row-active";
+        tr.innerHTML =
+            `<td>${_alphaStr(a.alpha)}</td>` +
+            `<td>${_fmtNum(a.gl_edge_density, 4)}</td>` +
+            `<td>${_fmtNum(a.der, 4)}</td>` +
+            `<td>${_fmtNum(a.dcr, 4)}</td>` +
+            `<td>${_fmtNum(a.dcs, 4)}</td>` +
+            `<td>${_fmtNum(a.gl_time_ms, 1)}</td>`;
+        tbody.appendChild(tr);
     });
 }
 
-/** Update the Sobel column of the processing-modal metrics table. */
-function _updatePmSobel(m) {
-    METRICS_DEF.forEach(([key, , sobelId, , , , , fmt]) => {
-        const el = document.getElementById(sobelId);
-        if (el) el.textContent = _fmtMetric(m[key], fmt);
+function _sobelFootText(sobel) {
+    return `Sobel: edge density = ${_fmtNum(sobel.edge_density, 4)}, час = ${_fmtNum(sobel.time_ms, 1)} мс`;
+}
+
+function _findAlpha(alphas, alpha) {
+    let best = alphas[0];
+    let bestDiff = Infinity;
+    alphas.forEach(a => {
+        const d = Math.abs(a.alpha - alpha);
+        if (d < bestDiff) { bestDiff = d; best = a; }
     });
+    return best;
 }
-
-/** Reset all processing-modal metric cells to "—". */
-function _resetPmMetrics() {
-    METRICS_DEF.forEach(([, fracId, sobelId]) => {
-        const f = document.getElementById(fracId);
-        const s = document.getElementById(sobelId);
-        if (f) f.textContent = "—";
-        if (s) s.textContent = "—";
-    });
-}
-
-/** Populate the results-modal metrics table from a result card's dataset. */
-function _populateRmMetrics(d) {
-    METRICS_DEF.forEach(([, , , rmFracId, rmSobelId, dsFracKey, dsSobelKey, fmt]) => {
-        const fEl = document.getElementById(rmFracId);
-        const sEl = document.getElementById(rmSobelId);
-        if (fEl) fEl.textContent = _fmtMetric(d[dsFracKey], fmt);
-        if (sEl) sEl.textContent = _fmtMetric(d[dsSobelKey], fmt);
-    });
-}
-
-// ── Saved-result comparison modal ───────────────────────────────────────────────
-const resultsModal = document.getElementById("resultsModal");
-const resultsCloseBtn = document.getElementById("resultsCloseBtn");
-let currentResultCard = null;
-
-function openResultsModal(card) {
-    currentResultCard = card;
-    const d = card.dataset;
-
-    document.getElementById("resultsFilename").textContent = d.source;
-    document.getElementById("resultsAlpha").textContent = d.alpha;
-    document.getElementById("resultsDate").textContent = d.date;
-
-    const origImg = document.getElementById("resOrigImg");
-    origImg.onerror = function () { origImg.onerror = null; origImg.src = window.ORIG_FALLBACK; };
-    origImg.src = d.origUrl;
-
-    document.getElementById("resFracImg").src = d.fracUrl;
-    document.getElementById("resFracTime").textContent = d.fracTime;
-
-    document.getElementById("resSobelImg").src = d.sobelUrl;
-    document.getElementById("resSobelTime").textContent = d.sobelTime;
-
-    _populateRmMetrics(d);
-    _renderResultsNoise(card);
-
-    resetZoom();
-    resultsModal.style.display = "flex";
-    lockScroll();
-}
-
-function _closeResultsModal() {
-    resultsModal.style.display = "none";
-    resetZoom();
-    unlockScroll();
-}
-
-resultsCloseBtn.onclick = _closeResultsModal;
-
-resultsModal.onclick = function (event) {
-    if (event.target === resultsModal) _closeResultsModal();
-};
-
-// ── Delete result ─────────────────────────────────────────────────────────────
-async function _doDeleteResult(card) {
-    const id = card.dataset.id;
-    const response = await fetch(`/result/${id}`, { method: "DELETE" });
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        alert("Помилка видалення: " + (err.error || response.status));
-        return;
-    }
-
-    card.remove();
-
-    const grid = document.querySelector("#resultsGallery .results-grid");
-    if (grid && grid.children.length === 0) {
-        grid.remove();
-        const msg = document.createElement("p");
-        msg.className = "empty-msg";
-        msg.textContent = "Поки що немає збережених результатів обробки.";
-        document.getElementById("resultsGallery").appendChild(msg);
-
-        const csvBtn = document.querySelector(".btn-export");
-        if (csvBtn) {
-            const span = document.createElement("span");
-            span.className = "btn-export btn-export-disabled";
-            span.innerHTML = "&#x2193; Експортувати результати (CSV)";
-            csvBtn.replaceWith(span);
-        }
-    }
-}
-
-function confirmDeleteResult(card) {
-    if (!confirm(`Видалити результат обробки «${card.dataset.source}»?`)) return;
-    _doDeleteResult(card);
-}
-
-function confirmDeleteResultFromModal() {
-    if (!currentResultCard) return;
-    if (!confirm(`Видалити результат обробки «${currentResultCard.dataset.source}»?`)) return;
-    const card = currentResultCard;
-    _closeResultsModal();
-    currentResultCard = null;
-    _doDeleteResult(card);
-}
-
-// ── Synchronized magnifier: hover one image → both zoom in at same point ──────────
-const ZOOM_FACTOR = 2.4;
-const zoomImgs = [
-    document.getElementById("resOrigImg"),
-    document.getElementById("resFracImg"),
-    document.getElementById("resSobelImg"),
-];
-
-function resetZoom() {
-    zoomImgs.forEach(img => {
-        img.style.transform = "scale(1)";
-        img.style.transformOrigin = "center center";
-    });
-}
-
-document.querySelectorAll("#resultsComparison .zoom-frame").forEach(frame => {
-    frame.addEventListener("mousemove", function (e) {
-        const rect = frame.getBoundingClientRect();
-        const x = ((e.clientX - rect.left) / rect.width) * 100;
-        const y = ((e.clientY - rect.top) / rect.height) * 100;
-        zoomImgs.forEach(img => {
-            img.style.transformOrigin = `${x}% ${y}%`;
-            img.style.transform = `scale(${ZOOM_FACTOR})`;
-        });
-    });
-    frame.addEventListener("mouseleave", resetZoom);
-});
 
 // ── Upload ────────────────────────────────────────────────────────────────────
 function confirmDelete(filename) {
@@ -308,30 +187,30 @@ async function uploadImage() {
 // ── Processing modal ──────────────────────────────────────────────────────────
 const processModal = document.getElementById("processModal");
 const processCloseBtn = document.getElementById("processCloseBtn");
+const sigmaSelect = document.getElementById("sigmaSelect");
+const alphaSelect = document.getElementById("alphaSelect");
 
 let currentFilename = null;
+let currentPreview = null;   // last preview payload {sigma, sobel, alphas}
+let previewSeq = 0;
+
+function _selectedSigma() { return parseFloat(sigmaSelect.value); }
+function _selectedAlpha() { return parseFloat(alphaSelect.value); }
 
 function openProcessModal(filename) {
     currentFilename = filename;
+    currentPreview = null;
     document.getElementById("processFilename").textContent = filename;
 
-    alphaSlider.value = "0.5";
-    alphaValue.textContent = "0.5";
-    fracAlphaLabel.textContent = "0.5";
-    _updateSliderFill(alphaSlider);
+    sigmaSelect.value = "0";
+    alphaSelect.value = "0.5";
 
     document.getElementById("processResults").style.display = "none";
-    document.getElementById("classicalImg").src = "";
-    document.getElementById("secondaryImg").src = "";
-    document.getElementById("classicalTime").textContent = "—";
-    document.getElementById("secondaryTime").textContent = "—";
-    _resetPmMetrics();
-    _resetNoiseTest();
     document.getElementById("processSpinner").style.display = "block";
 
     processModal.style.display = "flex";
     lockScroll();
-    previewBoth();
+    loadPreview();
 }
 
 processCloseBtn.onclick = function () {
@@ -346,61 +225,39 @@ processModal.onclick = function (event) {
     }
 };
 
-// ── Alpha slider: real-time fractional preview ────────────────────────────────
-const alphaSlider = document.getElementById("alphaSlider");
-const alphaValue = document.getElementById("alphaValue");
-const fracAlphaLabel = document.getElementById("fracAlphaLabel");
+function _applyProcessView() {
+    if (!currentPreview) return;
+    const alpha = _selectedAlpha();
+    const a = _findAlpha(currentPreview.alphas, alpha);
+    const sobel = currentPreview.sobel;
 
-let previewTimer = null;
-let previewSeq = 0;
+    document.getElementById("fracAlphaLabel").textContent = _alphaStr(a.alpha);
+    document.getElementById("fracSigmaLabel").textContent = String(currentPreview.sigma);
+    document.getElementById("classicalImg").src = a.data_url;
+    document.getElementById("classicalImg").style.opacity = "1";
+    document.getElementById("classicalTime").textContent = a.gl_time_ms;
+    document.getElementById("classicalDensity").textContent = _fmtNum(a.gl_edge_density, 4);
 
-function currentAlpha() {
-    return parseFloat(alphaSlider.value).toFixed(1);
-}
-
-function _updateSliderFill(slider) {
-    const pct = (slider.value - slider.min) / (slider.max - slider.min) * 100;
-    slider.style.setProperty("--fill-pct", pct.toFixed(2) + "%");
-}
-
-_updateSliderFill(alphaSlider);
-
-alphaSlider.addEventListener("input", function () {
-    const a = currentAlpha();
-    alphaValue.textContent = a;
-    fracAlphaLabel.textContent = a;
-    _updateSliderFill(this);
-    clearTimeout(previewTimer);
-    previewTimer = setTimeout(previewFractional, 180);
-    // The noise chart was computed for a previous α — invalidate it.
-    _resetNoiseTest();
-});
-
-function _applyFractional(frac) {
-    const img = document.getElementById("classicalImg");
-    img.src = frac.data_url;
-    img.style.opacity = "1";
-    document.getElementById("classicalTime").textContent = frac.time_ms;
-    fracAlphaLabel.textContent = parseFloat(frac.alpha).toFixed(1);
-    _updatePmFrac(frac);
-}
-
-function _applySobel(sobel) {
     document.getElementById("secondaryImg").src = sobel.data_url;
     document.getElementById("secondaryTime").textContent = sobel.time_ms;
-    _updatePmSobel(sobel);
+    document.getElementById("secondaryDensity").textContent = _fmtNum(sobel.edge_density, 4);
+
+    _renderAlphaTable("processAlphaTbody", currentPreview.alphas, a.alpha);
+    document.getElementById("processSobelFoot").textContent = _sobelFootText(sobel);
 }
 
-// Initial preview on modal open: both methods at once (no DB write)
-async function previewBoth() {
+async function loadPreview() {
     if (!currentFilename) return;
 
     const seq = ++previewSeq;
-    const alpha = currentAlpha();
+    const sigma = _selectedSigma();
+
+    document.getElementById("processResults").style.display = "none";
+    document.getElementById("processSpinner").style.display = "block";
 
     try {
         const response = await fetch(
-            `/preview/${encodeURIComponent(currentFilename)}?alpha=${alpha}&with_sobel=true`,
+            `/preview/${encodeURIComponent(currentFilename)}?sigma=${sigma}`,
             { method: "POST" }
         );
         if (!response.ok) {
@@ -411,8 +268,8 @@ async function previewBoth() {
         const data = await response.json();
         if (seq !== previewSeq) return;
 
-        _applyFractional(data.fractional);
-        _applySobel(data.sobel);
+        currentPreview = data;
+        _applyProcessView();
         document.getElementById("processResults").style.display = "block";
     } catch (err) {
         alert("Помилка обробки: " + err.message);
@@ -423,87 +280,35 @@ async function previewBoth() {
     }
 }
 
-// Preview only the fractional method — triggered by alpha slider movement
-async function previewFractional() {
-    if (!currentFilename) return;
-
-    const seq = ++previewSeq;
-    const alpha = currentAlpha();
-    const img = document.getElementById("classicalImg");
-    img.style.opacity = "0.4";
-
-    try {
-        const response = await fetch(
-            `/preview/${encodeURIComponent(currentFilename)}?alpha=${alpha}`,
-            { method: "POST" }
-        );
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.error || `Помилка сервера (${response.status})`);
-        }
-
-        const data = await response.json();
-        if (seq !== previewSeq) return;
-
-        _applyFractional(data.fractional);
-    } catch (err) {
-        if (seq === previewSeq) {
-            document.getElementById("classicalTime").textContent = "—";
-            _resetPmMetrics();
-        }
-    } finally {
-        if (seq === previewSeq) img.style.opacity = "1";
-    }
+function onProcessSigmaChange() {
+    loadPreview();
 }
 
-function _formatNow() {
-    const d = new Date();
-    const pad = n => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+function onProcessAlphaChange() {
+    _applyProcessView();
 }
 
-function _insertResultCard(filename, data, noiseData) {
-    const alpha    = parseFloat(data.classical.alpha).toFixed(1);
-    const fracUrl  = data.classical.url;
-    const sobelUrl = data.secondary.url;
-    const origUrl  = `/static/uploads/${encodeURIComponent(filename)}`;
-    const fracTime  = parseFloat(data.classical.time_ms).toFixed(1);
-    const sobelTime = parseFloat(data.secondary.time_ms).toFixed(1);
-    const date = _formatNow();
+// ── Save a run (all α) ─────────────────────────────────────────────────────────
+function _insertResultCard(run) {
+    const origUrl = `/static/uploads/${encodeURIComponent(run.source_filename)}`;
+    const firstGl = run.alphas.length ? run.alphas[0].url : "";
 
     const card = document.createElement("div");
     card.className = "result-card";
-    card.dataset.id        = data.id;
-    card.dataset.source    = filename;
-    card.dataset.origUrl   = origUrl;
-    card.dataset.alpha     = alpha;
-    card.dataset.fracUrl   = fracUrl;
-    card.dataset.fracTime  = fracTime;
-    card.dataset.sobelUrl  = sobelUrl;
-    card.dataset.sobelTime = sobelTime;
-    card.dataset.date      = date;
-    card.dataset.noise     = noiseData ? JSON.stringify(noiseData) : "";
-
-    // Store all new metrics in dataset
-    METRICS_DEF.forEach(([key, , , , , dsFracKey, dsSobelKey]) => {
-        const fracVal  = data.classical[key];
-        const sobelVal = data.secondary[key];
-        card.dataset[dsFracKey]  = (fracVal  !== undefined && fracVal  !== null) ? fracVal  : "";
-        card.dataset[dsSobelKey] = (sobelVal !== undefined && sobelVal !== null) ? sobelVal : "";
-    });
-
+    card.dataset.id = run.id;
+    card.dataset.run = JSON.stringify(run);
     card.setAttribute("onclick", "openResultsModal(this)");
 
     const fallback = `this.onerror=null;this.src=window.ORIG_FALLBACK`;
     card.innerHTML = `
         <div class="result-thumbs">
             <img src="${origUrl}" alt="Оригінал" onerror="${fallback}">
-            <img src="${fracUrl}" alt="Дробовий">
-            <img src="${sobelUrl}" alt="Sobel">
+            <img src="${firstGl}" alt="GL-Canny">
+            <img src="${run.sobel.url}" alt="Sobel">
         </div>
         <div class="result-info">
-            <span class="result-name">${filename}</span>
-            <span class="result-badge">α = ${alpha}</span>
+            <span class="result-name">${run.source_filename}</span>
+            <span class="result-badge">σ = ${run.sigma}</span>
         </div>
         <button class="result-delete-btn"
             onclick="event.stopPropagation(); confirmDeleteResult(this.closest('.result-card'))">
@@ -538,7 +343,7 @@ async function runProcessing() {
     if (!currentFilename) return;
 
     const runBtn = document.getElementById("runBtn");
-    const alpha = currentAlpha();
+    const sigma = _selectedSigma();
 
     const originalText = runBtn.textContent;
     runBtn.disabled = true;
@@ -546,7 +351,7 @@ async function runProcessing() {
 
     try {
         const response = await fetch(
-            `/process/${encodeURIComponent(currentFilename)}?alpha=${alpha}`,
+            `/process/${encodeURIComponent(currentFilename)}?sigma=${sigma}`,
             { method: "POST" }
         );
 
@@ -555,38 +360,8 @@ async function runProcessing() {
             throw new Error(err.error || `Помилка сервера (${response.status})`);
         }
 
-        const data = await response.json();
-
-        document.getElementById("classicalImg").src = data.classical.url;
-        document.getElementById("classicalImg").style.opacity = "1";
-        document.getElementById("classicalTime").textContent = data.classical.time_ms;
-        fracAlphaLabel.textContent = parseFloat(data.classical.alpha).toFixed(1);
-
-        document.getElementById("secondaryImg").src = data.secondary.url;
-        document.getElementById("secondaryTime").textContent = data.secondary.time_ms;
-
-        _updatePmFrac(data.classical);
-        _updatePmSobel(data.secondary);
-
-        document.getElementById("processResults").style.display = "block";
-
-        // Persist the noise test together with the pair, but only if it was
-        // computed for the same α that is now being saved.
-        let noiseToSave = null;
-        if (lastNoise && Math.abs(lastNoise.alpha - parseFloat(alpha)) < 1e-9) {
-            noiseToSave = lastNoise.data;
-            try {
-                await fetch(`/result/${data.id}/noise`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(noiseToSave),
-                });
-            } catch (e) {
-                noiseToSave = null;  // persistence failed → no chart on the card
-            }
-        }
-
-        _insertResultCard(currentFilename, data, noiseToSave);
+        const run = await response.json();
+        _insertResultCard(run);
 
         runBtn.textContent = "Збережено ✓";
         setTimeout(() => { runBtn.textContent = originalText; }, 2000);
@@ -598,143 +373,153 @@ async function runProcessing() {
     }
 }
 
-// ── Noise-robustness test (IoU vs σ) ────────────────────────────────────────────
-// Charts are keyed by canvas id: one for the processing modal (preview),
-// one for the saved-result modal.
-const noiseCharts = { noiseChart: null, resultsNoiseChart: null };
+// ── Saved-result comparison modal ───────────────────────────────────────────────
+const resultsModal = document.getElementById("resultsModal");
+const resultsCloseBtn = document.getElementById("resultsCloseBtn");
+const resultsAlphaSelect = document.getElementById("resultsAlphaSelect");
+let currentResultCard = null;
+let currentRun = null;
 
-// Last computed (preview) noise test, awaiting persistence with the saved pair.
-let lastNoise = null;
+function openResultsModal(card) {
+    currentResultCard = card;
+    let run;
+    try { run = JSON.parse(card.dataset.run); } catch (e) { return; }
+    currentRun = run;
 
-function _resetNoiseTest() {
-    const wrap = document.getElementById("noiseChartWrap");
-    const spinner = document.getElementById("noiseSpinner");
-    if (wrap) wrap.style.display = "none";
-    if (spinner) spinner.style.display = "none";
-    if (noiseCharts.noiseChart) { noiseCharts.noiseChart.destroy(); noiseCharts.noiseChart = null; }
-    lastNoise = null;
+    document.getElementById("resultsFilename").textContent = run.source_filename;
+    document.getElementById("resultsSigma").textContent = run.sigma;
+
+    const origImg = document.getElementById("resOrigImg");
+    origImg.onerror = function () { origImg.onerror = null; origImg.src = window.ORIG_FALLBACK; };
+    origImg.src = `/static/uploads/${encodeURIComponent(run.source_filename)}`;
+
+    document.getElementById("resSobelImg").src = run.sobel.url;
+    document.getElementById("resSobelTime").textContent = _fmtNum(run.sobel.time_ms, 1);
+    document.getElementById("resSobelDensity").textContent = _fmtNum(run.sobel.edge_density, 4);
+    document.getElementById("resultsSobelFoot").textContent = _sobelFootText(run.sobel);
+
+    // Populate α selector (default to 0.5 if present, else first).
+    resultsAlphaSelect.innerHTML = "";
+    let defaultIdx = 0;
+    run.alphas.forEach((a, i) => {
+        const opt = document.createElement("option");
+        opt.value = String(a.alpha);
+        opt.textContent = _alphaStr(a.alpha);
+        resultsAlphaSelect.appendChild(opt);
+        if (Math.abs(a.alpha - 0.5) < 1e-9) defaultIdx = i;
+    });
+    resultsAlphaSelect.selectedIndex = defaultIdx;
+
+    _applyResultsView();
+
+    resetZoom();
+    resultsModal.style.display = "flex";
+    lockScroll();
 }
 
-function _cssVar(name, fallback) {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name);
-    return v ? v.trim() : fallback;
+function _applyResultsView() {
+    if (!currentRun) return;
+    const alpha = parseFloat(resultsAlphaSelect.value);
+    const a = _findAlpha(currentRun.alphas, alpha);
+
+    document.getElementById("resFracAlpha").textContent = _alphaStr(a.alpha);
+    document.getElementById("resFracImg").src = a.url;
+    document.getElementById("resFracTime").textContent = _fmtNum(a.gl_time_ms, 1);
+    document.getElementById("resFracDensity").textContent = _fmtNum(a.gl_edge_density, 4);
+
+    _renderAlphaTable("resultsAlphaTbody", currentRun.alphas, a.alpha);
+    resetZoom();
 }
 
-function _renderNoiseChart(canvasId, data) {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas || typeof Chart === "undefined") return;
+function onResultsAlphaChange() {
+    _applyResultsView();
+}
 
-    const labels = data.noise_levels.map(v => "σ=" + v);
+function _closeResultsModal() {
+    resultsModal.style.display = "none";
+    resetZoom();
+    unlockScroll();
+}
 
-    const tick = _cssVar("--text-soft", "#7d8696");
-    const grid = _cssVar("--border", "rgba(125,134,150,0.25)");
+resultsCloseBtn.onclick = _closeResultsModal;
 
-    if (noiseCharts[canvasId]) noiseCharts[canvasId].destroy();
-    noiseCharts[canvasId] = new Chart(canvas.getContext("2d"), {
-        type: "line",
-        data: {
-            labels,
-            datasets: [
-                {
-                    label: "GL-Canny",
-                    data: data.gl_canny_iou,
-                    borderColor: "#4f8cff",
-                    backgroundColor: "rgba(79,140,255,0.15)",
-                    borderWidth: 2,
-                    tension: 0.25,
-                    pointRadius: 4,
-                },
-                {
-                    label: "Sobel",
-                    data: data.sobel_iou,
-                    borderColor: "#ff7d4f",
-                    backgroundColor: "rgba(255,125,79,0.15)",
-                    borderWidth: 2,
-                    tension: 0.25,
-                    pointRadius: 4,
-                },
-            ],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: "index", intersect: false },
-            scales: {
-                y: {
-                    min: 0, max: 1,
-                    title: { display: true, text: "IoU з чистою картою", color: tick },
-                    ticks: { color: tick },
-                    grid: { color: grid },
-                },
-                x: {
-                    title: { display: true, text: "Рівень гаусового шуму σ", color: tick },
-                    ticks: { color: tick },
-                    grid: { color: grid },
-                },
-            },
-            plugins: {
-                legend: { position: "top", labels: { color: tick } },
-            },
-        },
+resultsModal.onclick = function (event) {
+    if (event.target === resultsModal) _closeResultsModal();
+};
+
+// ── Delete result ─────────────────────────────────────────────────────────────
+async function _doDeleteResult(card) {
+    const id = card.dataset.id;
+    const response = await fetch(`/result/${id}`, { method: "DELETE" });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        alert("Помилка видалення: " + (err.error || response.status));
+        return;
+    }
+
+    card.remove();
+
+    const grid = document.querySelector("#resultsGallery .results-grid");
+    if (grid && grid.children.length === 0) {
+        grid.remove();
+        const msg = document.createElement("p");
+        msg.className = "empty-msg";
+        msg.textContent = "Поки що немає збережених результатів обробки.";
+        document.getElementById("resultsGallery").appendChild(msg);
+
+        const csvBtn = document.querySelector(".btn-export");
+        if (csvBtn) {
+            const span = document.createElement("span");
+            span.className = "btn-export btn-export-disabled";
+            span.innerHTML = "&#x2193; Експортувати результати (CSV)";
+            csvBtn.replaceWith(span);
+        }
+    }
+}
+
+function confirmDeleteResult(card) {
+    let name = card.dataset.id;
+    try { name = JSON.parse(card.dataset.run).source_filename; } catch (e) {}
+    if (!confirm(`Видалити результат обробки «${name}»?`)) return;
+    _doDeleteResult(card);
+}
+
+function confirmDeleteResultFromModal() {
+    if (!currentResultCard) return;
+    const name = currentRun ? currentRun.source_filename : "";
+    if (!confirm(`Видалити результат обробки «${name}»?`)) return;
+    const card = currentResultCard;
+    _closeResultsModal();
+    currentResultCard = null;
+    _doDeleteResult(card);
+}
+
+// ── Synchronized magnifier: hover one image → all zoom in at same point ──────────
+const ZOOM_FACTOR = 2.4;
+const zoomImgs = [
+    document.getElementById("resOrigImg"),
+    document.getElementById("resFracImg"),
+    document.getElementById("resSobelImg"),
+];
+
+function resetZoom() {
+    zoomImgs.forEach(img => {
+        if (!img) return;
+        img.style.transform = "scale(1)";
+        img.style.transformOrigin = "center center";
     });
 }
 
-async function runNoiseRobustness() {
-    if (!currentFilename) return;
-
-    const btn = document.getElementById("noiseTestBtn");
-    const spinner = document.getElementById("noiseSpinner");
-    const wrap = document.getElementById("noiseChartWrap");
-    const alpha = currentAlpha();
-
-    btn.disabled = true;
-    wrap.style.display = "none";
-    spinner.style.display = "block";
-
-    try {
-        const response = await fetch(
-            `/analyze/noise-robustness/${encodeURIComponent(currentFilename)}?alpha=${alpha}`,
-            { method: "POST" }
-        );
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.error || `Помилка сервера (${response.status})`);
-        }
-
-        const data = await response.json();
-        // Cache for persistence with the saved pair (tagged with the α it used).
-        lastNoise = { alpha: parseFloat(alpha), data };
-        _renderNoiseChart("noiseChart", data);
-        wrap.style.display = "block";
-    } catch (err) {
-        alert("Помилка тесту робастності: " + err.message);
-    } finally {
-        spinner.style.display = "none";
-        btn.disabled = false;
-    }
-}
-
-// Render the saved-result modal chart from a card's data-noise attribute.
-function _renderResultsNoise(card) {
-    const wrap = document.getElementById("resultsNoiseWrap");
-    const empty = document.getElementById("resultsNoiseEmpty");
-    if (noiseCharts.resultsNoiseChart) {
-        noiseCharts.resultsNoiseChart.destroy();
-        noiseCharts.resultsNoiseChart = null;
-    }
-
-    let data = null;
-    const raw = card.dataset.noise;
-    if (raw && raw !== "") {
-        try { data = JSON.parse(raw); } catch (e) { data = null; }
-    }
-
-    if (data && Array.isArray(data.noise_levels) && data.noise_levels.length) {
-        wrap.style.display = "block";
-        empty.style.display = "none";
-        _renderNoiseChart("resultsNoiseChart", data);
-    } else {
-        wrap.style.display = "none";
-        empty.style.display = "block";
-    }
-}
+document.querySelectorAll("#resultsComparison .zoom-frame").forEach(frame => {
+    frame.addEventListener("mousemove", function (e) {
+        const rect = frame.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width) * 100;
+        const y = ((e.clientY - rect.top) / rect.height) * 100;
+        zoomImgs.forEach(img => {
+            if (!img) return;
+            img.style.transformOrigin = `${x}% ${y}%`;
+            img.style.transform = `scale(${ZOOM_FACTOR})`;
+        });
+    });
+    frame.addEventListener("mouseleave", resetZoom);
+});

@@ -4,13 +4,20 @@ import numpy as np
 import cv2
 from pathlib import Path
 
-from metrics import compute_all_metrics, iou_score
+from metrics import edge_density, compute_comparison_metrics
 from noise import add_gaussian_noise
 
 DEFAULT_ALPHA = 0.5
 DEFAULT_N = 2
 
-NOISE_SIGMAS = (5, 10, 15, 20, 25)
+# Набір порядків дробової похідної α, для яких обчислюються метрики (зі статті
+# Mishra et al.; α=1.0 додано для валідації — GL-Canny має наближатись до Sobel).
+ALPHA_VALUES = [0.1, 0.3, 0.5, 0.7, 1.0, 1.3, 1.5, 1.7]
+
+# Рівні гаусівського шуму σ, доступні користувачу (0 — без шуму).
+SIGMA_OPTIONS = [0, 5, 10, 15, 20, 25]
+
+# Фіксований seed для відтворюваності зашумлених результатів.
 NOISE_SEED = 42
 
 
@@ -26,10 +33,10 @@ def gl_coefficients(alpha: float, n: int) -> np.ndarray:
 
 
 def build_fractional_kernel_x(alpha: float, n: int = DEFAULT_N) -> np.ndarray:
-    """
-    Antisymmetric 2D kernel (2n+1)×(2n+1) for the fractional derivative along X.
-    Row weights are triangular [1,2,…,n+1,…,2,1] as in Sobel.
-    At alpha=1 the kernel degenerates to the classical Sobel operator.
+    """...
+    At alpha=1 the second-order GL term vanishes and the kernel becomes a
+    first-order central-difference derivative with triangular row weights
+    [1,2,3,2,1] — Sobel-like, but a 5×5 operator, not the classical 3×3 Sobel.
     """
     w = gl_coefficients(alpha, n)
     size = 2 * n + 1
@@ -161,22 +168,6 @@ def _read_image(image_path: Path) -> np.ndarray:
     return img
 
 
-# ── Public methods for the web service ──────────────────────────────────────
-
-def apply_fractional(image_path: Path, alpha: float = DEFAULT_ALPHA, n: int = DEFAULT_N) -> dict:
-    img = _read_image(image_path)
-    t0 = time.perf_counter()
-    edges, grad_mag = fractional_edge_detection(img, alpha=alpha, n=n)
-    elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
-    return {
-        'edges_bgr': cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR),
-        'edge_map': edges,
-        'gradient_magnitude': grad_mag,
-        'elapsed_ms': elapsed_ms,
-        'original': img,
-    }
-
-
 def sobel_edge_detection(image: np.ndarray) -> tuple:
     """
     Classical Sobel edge detection on an in-memory image.
@@ -200,20 +191,6 @@ def sobel_edge_detection(image: np.ndarray) -> tuple:
     return edges, grad_mag
 
 
-def apply_sobel(image_path: Path) -> dict:
-    img = _read_image(image_path)
-    t0 = time.perf_counter()
-    edges, grad_mag = sobel_edge_detection(img)
-    elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
-    return {
-        'edges_bgr': cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR),
-        'edge_map': edges,
-        'gradient_magnitude': grad_mag,
-        'elapsed_ms': elapsed_ms,
-        'original': img,
-    }
-
-
 def _encode_b64(img_bgr: np.ndarray) -> str:
     ok, buf = cv2.imencode(".jpg", img_bgr)
     assert ok, "Cannot encode preview image"
@@ -221,102 +198,98 @@ def _encode_b64(img_bgr: np.ndarray) -> str:
     return f"data:image/jpeg;base64,{b64}"
 
 
-def fractional_preview(image_path: Path, alpha: float = DEFAULT_ALPHA, n: int = DEFAULT_N) -> dict:
-    """Quick preview for the alpha slider — returns metrics without saving to disk/DB."""
-    result = apply_fractional(image_path, alpha=alpha, n=n)
-    m = compute_all_metrics(
-        edge_map=result['edge_map'],
-        gradient_magnitude=result['gradient_magnitude'],
-        original_image=result['original'],
-    )
-    return {
-        "data_url": _encode_b64(result['edges_bgr']),
-        "time_ms": result['elapsed_ms'],
-        "alpha": alpha,
-        **m,
-    }
+# ── Public methods for the web service ──────────────────────────────────────
 
-
-def sobel_preview(image_path: Path) -> dict:
-    """Sobel preview as base64 data-URL — no disk/DB write."""
-    result = apply_sobel(image_path)
-    m = compute_all_metrics(
-        edge_map=result['edge_map'],
-        gradient_magnitude=result['gradient_magnitude'],
-        original_image=result['original'],
-    )
-    return {
-        "data_url": _encode_b64(result['edges_bgr']),
-        "time_ms": result['elapsed_ms'],
-        **m,
-    }
-
-
-def process_both(source_path: Path, output_dir: Path, alpha: float = DEFAULT_ALPHA) -> dict:
-    stem = source_path.stem
-    frac = apply_fractional(source_path, alpha=alpha)
-    sobel = apply_sobel(source_path)
-
-    frac_m = compute_all_metrics(
-        edge_map=frac['edge_map'],
-        gradient_magnitude=frac['gradient_magnitude'],
-        original_image=frac['original'],
-    )
-    sobel_m = compute_all_metrics(
-        edge_map=sobel['edge_map'],
-        gradient_magnitude=sobel['gradient_magnitude'],
-        original_image=sobel['original'],
-    )
-
-    frac_filename = f"{stem}_fractional.jpg"
-    sobel_filename = f"{stem}_sobel.jpg"
-    cv2.imwrite(str(output_dir / frac_filename), frac['edges_bgr'])
-    cv2.imwrite(str(output_dir / sobel_filename), sobel['edges_bgr'])
-
-    return {
-        "classical": {
-            "filename": frac_filename,
-            "time_ms": frac['elapsed_ms'],
-            "alpha": alpha,
-            **frac_m,
-        },
-        "secondary": {
-            "filename": sobel_filename,
-            "time_ms": sobel['elapsed_ms'],
-            **sobel_m,
-        },
-    }
-
-
-def noise_robustness(
-    image_path: Path,
-    alpha: float = DEFAULT_ALPHA,
-    n: int = DEFAULT_N,
-    seed: int = NOISE_SEED,
-) -> dict:
-    """
-    Noise-robustness battery: IoU between clean and noisy edge maps for
-    Gaussian noise at σ ∈ {5,10,15,20,25}. A method whose IoU decays
-    slower is more robust to noise.
-    """
+def _load_noisy(image_path: Path, sigma: float) -> np.ndarray:
+    """Зчитати зображення і (за потреби) додати гаусівський шум із обраним σ."""
     img = _read_image(image_path)
-    rng = np.random.RandomState(seed)
+    if sigma and sigma > 0:
+        rng = np.random.RandomState(NOISE_SEED)
+        img = add_gaussian_noise(img, float(sigma), rng=rng)
+    return img
 
-    gl_clean, _ = fractional_edge_detection(img, alpha=alpha, n=n)
-    sobel_clean, _ = sobel_edge_detection(img)
 
-    gl_canny_iou = []
-    sobel_iou = []
-    for sigma in NOISE_SIGMAS:
-        noisy = add_gaussian_noise(img, float(sigma), rng=rng)
-        gl_noisy, _ = fractional_edge_detection(noisy, alpha=alpha, n=n)
-        sobel_noisy, _ = sobel_edge_detection(noisy)
-        gl_canny_iou.append(iou_score(gl_clean, gl_noisy))
-        sobel_iou.append(iou_score(sobel_clean, sobel_noisy))
+def _timed_sobel(img: np.ndarray) -> tuple:
+    t0 = time.perf_counter()
+    edges, _ = sobel_edge_detection(img)
+    elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
+    return edges, elapsed_ms
 
-    return {
-        "noise_levels": [float(s) for s in NOISE_SIGMAS],
-        "sobel_iou": sobel_iou,
-        "gl_canny_iou": gl_canny_iou,
-        "alpha": alpha,
+
+def _timed_gl(img: np.ndarray, alpha: float, n: int = DEFAULT_N) -> tuple:
+    t0 = time.perf_counter()
+    edges, _ = fractional_edge_detection(img, alpha=alpha, n=n)
+    elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
+    return edges, elapsed_ms
+
+
+def _edges_bgr(edge_map: np.ndarray) -> np.ndarray:
+    return cv2.cvtColor(edge_map, cv2.COLOR_GRAY2BGR)
+
+
+def preview_all(image_path: Path, sigma: float = 0, n: int = DEFAULT_N) -> dict:
+    """
+    Швидкий прев'ю (без запису у БД/на диск) для обраного σ.
+
+    Sobel застосовується один раз; GL-Canny — для кожного α з ALPHA_VALUES.
+    Повертає карти країв у вигляді base64 data-URL і метрики порівняння.
+    """
+    img = _load_noisy(image_path, sigma)
+
+    sobel_edges, sobel_time = _timed_sobel(img)
+    sobel = {
+        "data_url": _encode_b64(_edges_bgr(sobel_edges)),
+        "edge_density": edge_density(sobel_edges),
+        "time_ms": sobel_time,
     }
+
+    alphas = []
+    for alpha in ALPHA_VALUES:
+        gl_edges, gl_time = _timed_gl(img, alpha, n)
+        cmp = compute_comparison_metrics(gl_edges, sobel_edges)
+        alphas.append({
+            "alpha": alpha,
+            "data_url": _encode_b64(_edges_bgr(gl_edges)),
+            "gl_edge_density": edge_density(gl_edges),
+            "gl_time_ms": gl_time,
+            **cmp,
+        })
+
+    return {"sigma": sigma, "sobel": sobel, "alphas": alphas}
+
+
+def process_all(source_path: Path, output_dir: Path, sigma: float = 0, n: int = DEFAULT_N) -> dict:
+    """
+    Повна обробка зображення для обраного σ: Sobel один раз + GL-Canny для
+    кожного α. Карти країв зберігаються на диск, повертається структура з
+    іменами файлів і метриками (по рядку на кожен α).
+    """
+    stem = source_path.stem
+    img = _load_noisy(source_path, sigma)
+    sig = int(sigma)
+
+    sobel_edges, sobel_time = _timed_sobel(img)
+    sobel_filename = f"{stem}_s{sig}_sobel.jpg"
+    cv2.imwrite(str(output_dir / sobel_filename), _edges_bgr(sobel_edges))
+
+    sobel = {
+        "filename": sobel_filename,
+        "edge_density": edge_density(sobel_edges),
+        "time_ms": sobel_time,
+    }
+
+    rows = []
+    for alpha in ALPHA_VALUES:
+        gl_edges, gl_time = _timed_gl(img, alpha, n)
+        cmp = compute_comparison_metrics(gl_edges, sobel_edges)
+        gl_filename = f"{stem}_s{sig}_gl{alpha}.jpg"
+        cv2.imwrite(str(output_dir / gl_filename), _edges_bgr(gl_edges))
+        rows.append({
+            "alpha": alpha,
+            "filename": gl_filename,
+            "gl_edge_density": edge_density(gl_edges),
+            "gl_time_ms": gl_time,
+            **cmp,
+        })
+
+    return {"sigma": sigma, "sobel": sobel, "alphas": rows}

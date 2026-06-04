@@ -47,7 +47,7 @@
                 document.getElementById('themeToggle').addEventListener('click', toggleTheme);
             });
         </script>
-        <link rel="stylesheet" href="/static/css/style.css">
+        <link rel="stylesheet" href="/static/css/style.css?v=3">
     </head>
     <body>
         <header class="site-header">
@@ -117,44 +117,26 @@
             {% endif %}
         </div>
 
-        <!-- Gallery 2: saved processing results -->
+        <!-- Gallery 2: saved processing runs -->
         <div id="resultsGallery" style="display:none">
-            {% if results %}
+            {% if runs %}
             <div class="gallery results-grid">
-                {% for r in results %}
+                {% for r in runs %}
                     <div class="result-card"
                         data-id="{{ r.id }}"
-                        data-source="{{ r.source_filename }}"
-                        data-orig-url="/static/uploads/{{ r.source_filename }}"
-                        data-alpha="{{ '%.1f'|format(r.fractional_alpha) if r.fractional_alpha is not none else '—' }}"
-                        data-frac-url="/static/processed/{{ r.fractional_filename }}"
-                        data-frac-time="{{ '%.1f'|format(r.fractional_time_ms) }}"
-                        data-frac-edge-density="{{ '%.6f'|format(r.fractional_edge_density) if r.fractional_edge_density is not none else '' }}"
-                        data-frac-mean-strength="{{ '%.6f'|format(r.fractional_mean_edge_strength) if r.fractional_mean_edge_strength is not none else '' }}"
-                        data-frac-num-comp="{{ r.fractional_num_components if r.fractional_num_components is not none else '' }}"
-                        data-frac-mean-len="{{ '%.6f'|format(r.fractional_mean_component_length) if r.fractional_mean_component_length is not none else '' }}"
-                        data-frac-frag="{{ '%.6f'|format(r.fractional_fragmentation) if r.fractional_fragmentation is not none else '' }}"
-                        data-frac-contrast="{{ '%.6f'|format(r.fractional_contrast_ratio) if r.fractional_contrast_ratio is not none else '' }}"
-                        data-sobel-url="/static/processed/{{ r.sobel_filename }}"
-                        data-sobel-time="{{ '%.1f'|format(r.sobel_time_ms) }}"
-                        data-sobel-edge-density="{{ '%.6f'|format(r.sobel_edge_density) if r.sobel_edge_density is not none else '' }}"
-                        data-sobel-mean-strength="{{ '%.6f'|format(r.sobel_mean_edge_strength) if r.sobel_mean_edge_strength is not none else '' }}"
-                        data-sobel-num-comp="{{ r.sobel_num_components if r.sobel_num_components is not none else '' }}"
-                        data-sobel-mean-len="{{ '%.6f'|format(r.sobel_mean_component_length) if r.sobel_mean_component_length is not none else '' }}"
-                        data-sobel-frag="{{ '%.6f'|format(r.sobel_fragmentation) if r.sobel_fragmentation is not none else '' }}"
-                        data-sobel-contrast="{{ '%.6f'|format(r.sobel_contrast_ratio) if r.sobel_contrast_ratio is not none else '' }}"
-                        data-date="{{ r.processed_at.strftime('%Y-%m-%d %H:%M') if r.processed_at else '' }}"
-                        data-noise='{{ noise_by_result[r.id]|tojson if r.id in noise_by_result else "" }}'
+                        data-run='{{ runs_data[r.id]|tojson }}'
                         onclick="openResultsModal(this)">
                         <div class="result-thumbs">
                             <img src="/static/uploads/{{ r.source_filename }}" alt="Оригінал"
                                 onerror="this.onerror=null;this.src=window.ORIG_FALLBACK">
-                            <img src="/static/processed/{{ r.fractional_filename }}" alt="Дробовий">
+                            {% if r.detections %}
+                            <img src="/static/processed/{{ r.detections[0].gl_filename }}" alt="GL-Canny">
+                            {% endif %}
                             <img src="/static/processed/{{ r.sobel_filename }}" alt="Sobel">
                         </div>
                         <div class="result-info">
                             <span class="result-name">{{ r.source_filename }}</span>
-                            <span class="result-badge">α = {{ '%.1f'|format(r.fractional_alpha) if r.fractional_alpha is not none else '—' }}</span>
+                            <span class="result-badge">σ = {{ '%g'|format(r.sigma) }}</span>
                         </div>
                         <button class="result-delete-btn"
                             onclick="event.stopPropagation(); confirmDeleteResult(this.closest('.result-card'))">
@@ -181,18 +163,23 @@
                 <span class="close-btn process-close-btn" id="processCloseBtn">&times;</span>
                 <h2>Порівняння методів: <em id="processFilename"></em></h2>
 
-                <div class="alpha-control">
-                    <div class="alpha-control-head">
-                        <label for="alphaSlider">Порядок дробової похідної</label>
-                        <span class="alpha-value">α = <strong id="alphaValue">0.5</strong></span>
+                <div class="controls-row">
+                    <div class="control-group">
+                        <label for="sigmaSelect">Рівень гаусівського шуму σ</label>
+                        <select id="sigmaSelect" class="ctrl-select" onchange="onProcessSigmaChange()">
+                            {% for s in sigma_options %}
+                            <option value="{{ s }}">{{ '0 (без шуму)' if s == 0 else s }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
-                    <input type="range" id="alphaSlider" min="0.1" max="1.9" step="0.1" value="0.5">
-                    <div class="alpha-scale">
-                        <span>0.1</span>
-                        <span>1.0 (≈ Sobel)</span>
-                        <span>1.9</span>
+                    <div class="control-group">
+                        <label for="alphaSelect">Порядок дробової похідної α</label>
+                        <select id="alphaSelect" class="ctrl-select" onchange="onProcessAlphaChange()">
+                            {% for a in alpha_values %}
+                            <option value="{{ a }}" {{ 'selected' if a == 0.5 }}>{{ '%g'|format(a) }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
-                    <p class="alpha-hint">Рухайте повзунок — ліва панель оновлюється в реальному часі</p>
                 </div>
 
                 <button id="runBtn" onclick="runProcessing()">Зберегти результат</button>
@@ -205,10 +192,11 @@
                 <div id="processResults" style="display:none">
                     <div class="comparison">
                         <div class="comparison-panel">
-                            <h3>GL-Canny (α=<span id="fracAlphaLabel">0.5</span>)</h3>
+                            <h3>GL-Canny (α=<span id="fracAlphaLabel">0.5</span>, σ=<span id="fracSigmaLabel">0</span>)</h3>
                             <img id="classicalImg" src="" alt="Fractional derivative result">
                             <div class="metrics">
                                 <span>Час: <strong id="classicalTime">—</strong> мс</span>
+                                <span>Edge density: <strong id="classicalDensity">—</strong></span>
                             </div>
                         </div>
                         <div class="comparison-panel">
@@ -216,43 +204,26 @@
                             <img id="secondaryImg" src="" alt="Sobel result">
                             <div class="metrics">
                                 <span>Час: <strong id="secondaryTime">—</strong> мс</span>
+                                <span>Edge density: <strong id="secondaryDensity">—</strong></span>
                             </div>
                         </div>
-                    </div>
-                    <div class="metrics-table-wrap">
-                        <table class="metrics-cmp-table">
-                            <thead>
-                                <tr>
-                                    <th class="metrics-th-name">Метрика</th>
-                                    <th>GL-Canny</th>
-                                    <th>Sobel</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr><td>Edge density</td><td id="pmFracDensity">—</td><td id="pmSobelDensity">—</td></tr>
-                                <tr><td>Mean edge strength</td><td id="pmFracStrength">—</td><td id="pmSobelStrength">—</td></tr>
-                                <tr><td>Кількість компонент</td><td id="pmFracNumComp">—</td><td id="pmSobelNumComp">—</td></tr>
-                                <tr><td>Середня довжина (px)</td><td id="pmFracMeanLen">—</td><td id="pmSobelMeanLen">—</td></tr>
-                                <tr><td>Фрагментація</td><td id="pmFracFrag">—</td><td id="pmSobelFrag">—</td></tr>
-                                <tr><td>Контрастність країв</td><td id="pmFracContrast">—</td><td id="pmSobelContrast">—</td></tr>
-                            </tbody>
-                        </table>
                     </div>
 
-                    <div class="noise-test-section">
-                        <button id="noiseTestBtn" type="button" onclick="runNoiseRobustness()">
-                            Тест робастності до шуму
-                        </button>
-                        <div id="noiseSpinner" class="spinner-container" style="display:none">
-                            <div class="spinner"></div>
-                            <p>Аналіз робастності (це може зайняти кілька секунд)…</p>
-                        </div>
-                        <div id="noiseChartWrap" style="display:none">
-                            <h3 class="noise-chart-title" id="noiseChartTitle">Стійкість до гаусового шуму</h3>
-                            <div class="noise-chart-box">
-                                <canvas id="noiseChart"></canvas>
-                            </div>
-                        </div>
+                    <div class="metrics-table-wrap metrics-table-wrap--wide">
+                        <table class="metrics-cmp-table alpha-table">
+                            <thead>
+                                <tr>
+                                    <th>α</th>
+                                    <th>Edge density GL</th>
+                                    <th>DER</th>
+                                    <th>DCR</th>
+                                    <th>DCS</th>
+                                    <th>Час GL (мс)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="processAlphaTbody"></tbody>
+                        </table>
+                        <p class="alpha-table-foot" id="processSobelFoot">Sobel: edge density = —, час = — мс</p>
                     </div>
                 </div>
             </div>
@@ -265,8 +236,11 @@
                 <h2>Результат обробки: <em id="resultsFilename"></em></h2>
                 <div class="results-modal-actions">
                     <p class="results-meta">
-                        <span class="results-chip">α = <strong id="resultsAlpha">—</strong></span>
-                        <span class="results-chip results-date" id="resultsDate"></span>
+                        <span class="results-chip">σ = <strong id="resultsSigma">—</strong></span>
+                        <span class="control-group control-group--inline">
+                            <label for="resultsAlphaSelect">α</label>
+                            <select id="resultsAlphaSelect" class="ctrl-select" onchange="onResultsAlphaChange()"></select>
+                        </span>
                     </p>
                     <button class="btn-delete-result" onclick="confirmDeleteResultFromModal()">
                         🗑 Видалити результат
@@ -285,12 +259,13 @@
                         </div>
                     </div>
                     <div class="comparison-panel">
-                        <h3>Метод дробових похідних</h3>
+                        <h3>GL-Canny (α=<span id="resFracAlpha">—</span>)</h3>
                         <div class="zoom-frame">
                             <img id="resFracImg" class="zoom-img" src="" alt="Fractional derivative result">
                         </div>
                         <div class="metrics">
                             <span>Час: <strong id="resFracTime"></strong> мс</span>
+                            <span>Edge density: <strong id="resFracDensity"></strong></span>
                         </div>
                     </div>
                     <div class="comparison-panel">
@@ -300,40 +275,27 @@
                         </div>
                         <div class="metrics">
                             <span>Час: <strong id="resSobelTime"></strong> мс</span>
+                            <span>Edge density: <strong id="resSobelDensity"></strong></span>
                         </div>
                     </div>
                 </div>
-                <p class="zoom-hint">🔍 Наведіть курсор на будь-яке зображення — обидва синхронно збільшаться у тій самій точці</p>
-                <div class="metrics-table-wrap">
-                    <table class="metrics-cmp-table">
+                <p class="zoom-hint">🔍 Наведіть курсор на будь-яке зображення — усі синхронно збільшаться у тій самій точці</p>
+
+                <div class="metrics-table-wrap metrics-table-wrap--wide">
+                    <table class="metrics-cmp-table alpha-table">
                         <thead>
                             <tr>
-                                <th class="metrics-th-name">Метрика</th>
-                                <th>GL-Canny</th>
-                                <th>Sobel</th>
+                                <th>α</th>
+                                <th>Edge density GL</th>
+                                <th>DER</th>
+                                <th>DCR</th>
+                                <th>DCS</th>
+                                <th>Час GL (мс)</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            <tr><td>Edge density</td><td id="rmFracDensity">—</td><td id="rmSobelDensity">—</td></tr>
-                            <tr><td>Mean edge strength</td><td id="rmFracStrength">—</td><td id="rmSobelStrength">—</td></tr>
-                            <tr><td>Кількість компонент</td><td id="rmFracNumComp">—</td><td id="rmSobelNumComp">—</td></tr>
-                            <tr><td>Середня довжина (px)</td><td id="rmFracMeanLen">—</td><td id="rmSobelMeanLen">—</td></tr>
-                            <tr><td>Фрагментація</td><td id="rmFracFrag">—</td><td id="rmSobelFrag">—</td></tr>
-                            <tr><td>Контрастність країв</td><td id="rmFracContrast">—</td><td id="rmSobelContrast">—</td></tr>
-                        </tbody>
+                        <tbody id="resultsAlphaTbody"></tbody>
                     </table>
-                </div>
-
-                <div class="noise-test-section">
-                    <h3 class="noise-chart-title">Стійкість до гаусового шуму</h3>
-                    <div id="resultsNoiseWrap" style="display:none">
-                        <div class="noise-chart-box">
-                            <canvas id="resultsNoiseChart"></canvas>
-                        </div>
-                    </div>
-                    <p id="resultsNoiseEmpty" class="empty-msg noise-empty-msg" style="display:none">
-                        Тест робастності до шуму для цієї пари не проводився.
-                    </p>
+                    <p class="alpha-table-foot" id="resultsSobelFoot">Sobel: edge density = —, час = — мс</p>
                 </div>
             </div>
         </div>
@@ -344,9 +306,9 @@
                 <span class="close-btn process-close-btn" id="infoCloseBtn">&times;</span>
                 <h2>Про програму</h2>
                 <p class="info-intro">
-                    Вебсервіс для виявлення контурів на зображеннях. Для кожного зображення
-                    обчислюються та порівнюються два методи, а їхні результати й кількісні
-                    метрики зберігаються в базі даних.
+                    Вебсервіс для виявлення контурів на зображеннях. До зображення застосовуються
+                    два методи — класичний Sobel і дробовий детектор Канні (GL-Canny). Метрики
+                    обчислюються для набору порядків дробової похідної α та зберігаються в базі даних.
                 </p>
 
                 <section class="info-section">
@@ -356,8 +318,7 @@
                         обчислюються наближення часткових похідних яскравості по горизонталі (G<sub>x</sub>)
                         та вертикалі (G<sub>y</sub>). Модуль градієнта |G| = &radic;(G<sub>x</sub>&sup2; + G<sub>y</sub>&sup2;)
                         відображає силу перепаду яскравості; пікселі, де |G| перевищує поріг, позначаються
-                        як контур. Метод дуже швидкий і простий, але чутливіший до шуму та дає товщі,
-                        менш деталізовані контури.
+                        як контур. У порівнянні цей метод виступає референсом (I<sub>2</sub>).
                     </p>
                 </section>
 
@@ -366,68 +327,57 @@
                     <p>
                         Розширення класичного алгоритму Canny, у якому цілочисельна похідна замінена
                         на <strong>дробову порядку α</strong>. Маски градієнта будуються з коефіцієнтів
-                        <strong>Грюнвальда–Летнікова</strong> (рекурентна формула) — це антисиметричні
-                        ядра (2n+1)&times;(2n+1) з трикутним зважуванням рядків. Далі застосовується повний
-                        конвеєр Canny: об'єднання поканальних градієнтів за L2-нормою, придушення
-                        немаксимумів уздовж напрямку градієнта, подвійне порогування з гістерезисом
-                        і зв'язування контурів через зв'язні компоненти; верхній поріг визначається
-                        автоматично методом Оцу (Otsu).
-                    </p>
-                    <p>
-                        Параметр <strong>α (0.1–1.9)</strong> керує чутливістю: менші значення підсилюють
-                        слабкі й тонкі контури, а при α=1 метод вироджується у класичний, Sobel-подібний
-                        оператор. Повзунок дозволяє змінювати α у реальному часі.
+                        <strong>Грюнвальда–Летнікова</strong> — антисиметричні ядра (2n+1)&times;(2n+1)
+                        з трикутним зважуванням рядків. Далі застосовується повний конвеєр Canny:
+                        об'єднання поканальних градієнтів за L2-нормою, придушення немаксимумів,
+                        подвійне порогування з гістерезисом і зв'язування контурів; верхній поріг
+                        визначається автоматично методом Оцу (Otsu). Метрики обчислюються для набору
+                        значень α (0.1…1.7); при α=1 метод наближається до Sobel.
                     </p>
                 </section>
 
                 <section class="info-section">
-                    <h3>3. Метрики оцінювання</h3>
+                    <h3>3. Гаусівський шум (σ)</h3>
+                    <p>
+                        Користувач може обрати рівень адитивного гаусівського шуму σ ∈ {0, 5, 10, 15, 20, 25}.
+                        Обидва методи застосовуються до <strong>зашумленого</strong> зображення, що дозволяє
+                        порівняти стійкість методів до шуму. При σ=0 обробляється чисте зображення.
+                    </p>
+                </section>
+
+                <section class="info-section">
+                    <h3>4. Метрики оцінювання</h3>
                     <ul class="info-metrics">
                         <li>
                             <strong>Edge density</strong> — частка пікселів-країв у зображенні (значення в [0, 1]).
-                            Дозволяє оцінити, наскільки «насиченою» є карта країв.
-                        </li>
-                        <li>
-                            <strong>Mean edge strength</strong> — середнє значення модуля градієнта |G| на
-                            edge-пікселях (нормоване до [0, 1]). Показує, наскільки впевнено метод знаходить
-                            перепади яскравості.
-                        </li>
-                        <li>
-                            <strong>Кількість компонент</strong> — кількість зв'язних компонент (відрізків країв)
-                            у бінарній карті. Менша кількість компонент — довші, безперервніші лінії.
-                        </li>
-                        <li>
-                            <strong>Середня довжина (px)</strong> — середня кількість пікселів у зв'язній
-                            компоненті. Більше значення означає довші та цілісніші контури.
-                        </li>
-                        <li>
-                            <strong>Фрагментація</strong> — відношення кількості компонент до загальної
-                            кількості edge-пікселів. Низьке значення означає безперервні контури.
-                        </li>
-                        <li>
-                            <strong>Контрастність країв</strong> — середня максимальна різниця яскравості між
-                            edge-пікселем та його 4-зв'язними сусідами, нормована до [0, 1]. Відображає чіткість
-                            переходів.
+                            Обчислюється окремо для кожного методу.
                         </li>
                         <li>
                             <strong>Час обробки (мс)</strong> — тривалість виконання алгоритму виявлення
-                            контурів (без читання та запису файлів), виміряна високоточним таймером.
+                            контурів, виміряна високоточним таймером (окремо для кожного методу).
                         </li>
                         <li>
-                            <strong>IoU (Intersection over Union)</strong> — міра збігу двох бінарних
-                            карт країв: відношення кількості пікселів у перетині до кількості пікселів
-                            в об'єднанні (значення в [0, 1]; 1 — ідентичні карти, 0 — жодного спільного
-                            пікселя). Використовується у тесті робастності до шуму: карта країв чистого
-                            зображення порівнюється з картою зображення із доданим гаусовим шумом різних
-                            рівнів (σ = 5…25). Чим повільніше падає IoU зі зростанням σ, тим стійкіший
-                            метод до шуму.
+                            <strong>DER (Detection Error Rate)</strong> — частка edge-пікселів, що є у карті
+                            GL-Canny (I<sub>1</sub>), але відсутні у карті Sobel (I<sub>2</sub>), віднесена до
+                            загальної кількості країв Sobel.
+                        </li>
+                        <li>
+                            <strong>DCR (Detection Common Rate)</strong> — частка спільних edge-пікселів
+                            (наявних і в I<sub>1</sub>, і в I<sub>2</sub>) відносно кількості країв Sobel.
+                        </li>
+                        <li>
+                            <strong>DCS (Detect Correct Similarity)</strong> — відношення DCR / DER. Вищі
+                            значення означають кращий збіг GL-Canny із референсом Sobel (зокрема при α≈1).
                         </li>
                     </ul>
+                    <p class="info-note">
+                        DER, DCR і DCS — метрики порівняння двох карт країв між собою (Mishra et al.),
+                        де карта Sobel береться за референс.
+                    </p>
                 </section>
             </div>
         </div>
 
-        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-        <script src="/static/js/script.js"></script>
+        <script src="/static/js/script.js?v=3"></script>
     </body>
 </html>
